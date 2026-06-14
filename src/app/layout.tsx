@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -13,8 +13,18 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Grok Agent",
-  description: "A Next.js AI agent powered by xAI Grok with tool calling.",
+  title: "BRUTHA — Agentic AI",
+  description:
+    "BRUTHA — a polished, agentic AI assistant powered by xAI Grok with 50+ built-in tools.",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f7f8fb" },
+    { media: "(prefers-color-scheme: dark)", color: "#07080d" },
+  ],
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -27,7 +37,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }
