@@ -4,17 +4,25 @@ A minimal **AI agent** built with **Next.js 16 (App Router)**, the **Vercel AI S
 
 ## Features
 
-- **Agentic tool-calling loop** via the AI SDK's `ToolLoopAgent` (model → tool → model, up to 10 steps).
+- **Agentic tool-calling loop** via the AI SDK's `ToolLoopAgent` (model → tool → model, up to 12 steps).
 - **Streaming responses** with the `useChat` hook (AI SDK v6).
-- **Built-in tools**:
-  - `calculate` — safe arithmetic evaluation
-  - `getCurrentTime` — current date/time in any IANA time zone
-  - `getWeather` — current weather for any place (free Open-Meteo API, no key)
-  - `sendEmail` — send mail via SMTP (optional; reports "not configured" if no creds)
-  - `saveContact` / `findContact` — store & look up people in local SQLite
-  - `saveNote` / `searchNotes` — save & full-text-search freeform notes
+- **30+ built-in tools**, organized by category in `src/lib/tools/`:
+
+  **Math & conversions** — `calculate`, `convertUnits` (length/mass/temp/volume), `convertCurrency` (live ECB rates), `convertTimeZone`
+
+  **Time & weather** — `getCurrentTime`, `getWeather`, `forecast` (multi-day)
+
+  **Knowledge & web** — `wikipedia`, `dictionary`, `fetchUrl` (read any page/API), `countryInfo`, `cryptoPrice`, `ipInfo`, `topNews` (Hacker News)
+
+  **Memory (local SQLite)** — contacts: `saveContact` / `findContact` / `listContacts` / `updateContact` / `deleteContact`; notes: `saveNote` / `searchNotes` (FTS5) / `listNotes` / `deleteNote`; tasks: `addTask` / `listTasks` / `completeTask` / `deleteTask`
+
+  **Generators & encoders** — `generatePassword`, `generateUuid`, `hashText` (md5/sha1/sha256/sha512), `encodeBase64`, `qrCode`, `randomNumber`, `rollDice`, `colorInfo`, `countText`
+
+  **Email (optional)** — `sendEmail` via SMTP; reports "not configured" if no creds
+
 - **Visible tool activity** — the UI shows when the agent invokes a tool.
-- **Local persistence** — contacts and notes stored in a SQLite file under `./data` (gitignored).
+- **Local persistence** — contacts, notes, and tasks stored in a SQLite file under `./data` (gitignored).
+- Almost every tool is **keyless** and works out of the box (only `sendEmail` needs config).
 - TypeScript + Tailwind CSS throughout.
 
 ## Project structure
@@ -22,9 +30,14 @@ A minimal **AI agent** built with **Next.js 16 (App Router)**, the **Vercel AI S
 ```
 src/
 ├── lib/
-│   ├── agent.ts          # Agent definition: model, system prompt, tools
-│   ├── db.ts             # SQLite store (contacts + notes, FTS5 search)
-│   └── email.ts          # SMTP email sending (nodemailer)
+│   ├── agent.ts          # Agent definition: model, system prompt, composes all tools
+│   ├── db.ts             # SQLite store (contacts, notes w/ FTS5, tasks)
+│   ├── email.ts          # SMTP email sending (nodemailer)
+│   └── tools/
+│       ├── utility.ts    # calculate, conversions, generators, encoders
+│       ├── web.ts        # weather, wikipedia, currency, crypto, news, ...
+│       ├── storage.ts    # contacts / notes / tasks CRUD
+│       └── email.ts      # sendEmail tool
 └── app/
     ├── api/chat/route.ts # Streaming chat endpoint (Node.js runtime)
     ├── page.tsx          # Chat UI (useChat)

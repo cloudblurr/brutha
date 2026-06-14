@@ -36,6 +36,14 @@ export function getDb(): Database.Database {
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS tasks (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      task      TEXT NOT NULL,
+      due       TEXT,
+      done      INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Full-text index over notes (kept in sync via triggers).
     CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts
       USING fts5(title, content, content='notes', content_rowid='id');
