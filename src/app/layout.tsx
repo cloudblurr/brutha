@@ -20,12 +20,26 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f8fb" },
-    { media: "(prefers-color-scheme: dark)", color: "#07080d" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#212121" },
   ],
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
 };
+
+// Set the theme class before paint to avoid a flash of the wrong theme.
+const themeInit = `
+(function() {
+  try {
+    var t = localStorage.getItem('brutha-theme');
+    if (!t) t = 'dark';
+    if (t === 'dark') document.documentElement.classList.add('dark');
+  } catch (e) {
+    document.documentElement.classList.add('dark');
+  }
+})();
+`;
 
 export default function RootLayout({
   children,
@@ -36,7 +50,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+      </head>
       <body className="min-h-full">{children}</body>
     </html>
   );
