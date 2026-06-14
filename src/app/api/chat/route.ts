@@ -1,7 +1,9 @@
 import { convertToModelMessages, type UIMessage } from "ai";
 import { grokAgent } from "@/lib/agent";
 
-// Stream responses; this route runs on the Node.js runtime.
+// Stream responses; this route runs on the Node.js runtime (required for
+// better-sqlite3 and nodemailer).
+export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
