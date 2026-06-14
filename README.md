@@ -4,21 +4,29 @@ A minimal **AI agent** built with **Next.js 16 (App Router)**, the **Vercel AI S
 
 ## Features
 
-- **Agentic tool-calling loop** via the AI SDK's `ToolLoopAgent` (model → tool → model, up to 12 steps).
+- **Agentic tool-calling loop** via the AI SDK's `ToolLoopAgent` (model → tool → model, up to 14 steps).
 - **Streaming responses** with the `useChat` hook (AI SDK v6).
-- **30+ built-in tools**, organized by category in `src/lib/tools/`:
+- **50+ built-in tools**, organized by category in `src/lib/tools/`:
 
-  **Math & conversions** — `calculate`, `convertUnits` (length/mass/temp/volume), `convertCurrency` (live ECB rates), `convertTimeZone`
+  **Math & conversions** — `calculate`, `convertUnits` (length/mass/temp/volume), `convertCurrency` (live ECB rates), `convertTimeZone`, `numberToWords`
 
-  **Time & weather** — `getCurrentTime`, `getWeather`, `forecast` (multi-day)
+  **Dates** — `dateDiff`, `daysUntil`, `addToDate`, `dayOfWeek`, `createCalendarEvent` (.ics export)
 
-  **Knowledge & web** — `wikipedia`, `dictionary`, `fetchUrl` (read any page/API), `countryInfo`, `cryptoPrice`, `ipInfo`, `topNews` (Hacker News)
+  **Time & weather** — `getCurrentTime`, `getWeather`, `forecast` (multi-day), `sunriseSunset`
+
+  **Knowledge & web** — `wikipedia`, `dictionary`, `fetchUrl` (read any page/API), `countryInfo`, `cryptoPrice`, `ipInfo`, `topNews` (Hacker News), `translate`
+
+  **Geo** — `distanceBetween` (great-circle distance), `sunriseSunset`
 
   **Memory (local SQLite)** — contacts: `saveContact` / `findContact` / `listContacts` / `updateContact` / `deleteContact`; notes: `saveNote` / `searchNotes` (FTS5) / `listNotes` / `deleteNote`; tasks: `addTask` / `listTasks` / `completeTask` / `deleteTask`
 
+  **Text & data** — `slugify`, `changeCase` (upper/lower/title/camel/snake/kebab), `regexExtract`, `formatJson`, `csvToJson`, `parseUrl`, `sortList`
+
   **Generators & encoders** — `generatePassword`, `generateUuid`, `hashText` (md5/sha1/sha256/sha512), `encodeBase64`, `qrCode`, `randomNumber`, `rollDice`, `colorInfo`, `countText`
 
-  **Email (optional)** — `sendEmail` via SMTP; reports "not configured" if no creds
+  **Health & fun** — `calculateBmi`, `getJoke`, `getQuote`, `activitySuggestion`
+
+  **Email (optional)** — `sendEmail` via SMTP; defaults to the configured test recipient and reports "not configured" if no creds
 
 - **Visible tool activity** — the UI shows when the agent invokes a tool.
 - **Local persistence** — contacts, notes, and tasks stored in a SQLite file under `./data` (gitignored).
@@ -37,6 +45,9 @@ src/
 │       ├── utility.ts    # calculate, conversions, generators, encoders
 │       ├── web.ts        # weather, wikipedia, currency, crypto, news, ...
 │       ├── storage.ts    # contacts / notes / tasks CRUD
+│       ├── datetime.ts   # date diff/add, day-of-week, ICS event export
+│       ├── text.ts       # translate, slugify, case, regex, JSON/CSV, URL, sort
+│       ├── extras.ts     # jokes, quotes, sunrise/sunset, distance, BMI, activity
 │       └── email.ts      # sendEmail tool
 └── app/
     ├── api/chat/route.ts # Streaming chat endpoint (Node.js runtime)
@@ -120,6 +131,7 @@ The model will automatically discover and call it when relevant.
 | `SMTP_USER`    | _(none)_     | Optional. SMTP username / email.     |
 | `SMTP_PASS`    | _(none)_     | Optional. SMTP / app password.       |
 | `SMTP_FROM`    | `SMTP_USER`  | Optional. From address.              |
+| `TEST_EMAIL_TO`| `dev00engine@blurr.cloud` | Default recipient when `sendEmail` is called without a `to`. |
 
 > **Email is optional.** Without SMTP vars, the `sendEmail` tool simply
 > reports that email is not configured — the rest of the agent works fine.
