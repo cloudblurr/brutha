@@ -1,0 +1,61 @@
+# Render Blueprint for BRUTHA (Grok Agent)
+# Deploy: push to GitHub, then in Render → New → Blueprint → pick this repo.
+#
+# Why Render (not Vercel): this app uses better-sqlite3 writing to a local file
+# (./data/agent.db) and writes uploads to ./data/uploads. That requires a
+# PERSISTENT, WRITABLE disk + a long-lived Node server — neither of which
+# Vercel's serverless functions provide. The `disk` block below mounts a
+# persistent volume at /app/data so the database and uploads survive restarts
+# and redeploys.
+services:
+  - type: web
+    name: brutha
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter # starter+ required for a persistent disk (free tier has no disk)
+    healthCheckPath: /
+    autoDeploy: true
+    # Persistent disk — THIS is what makes SQLite + uploads work. Without it,
+    # the DB is wiped on every deploy/restart.
+    disk:
+      name: brutha-data
+      mountPath: /app/data
+      sizeGB: 5
+    envVars:
+      # ---- Required ----
+      - key: XAI_API_KEY
+        sync: false # set the real value in the Render dashboard (secret)
+      - key: AUTH_SECRET
+        generateValue: true # Render generates a strong secret automatically
+      # ---- Auth callback base URL (Auth.js needs to know its own origin) ----
+      - key: AUTH_TRUST_HOST
+        value: "true"
+      # NEXTAUTH_URL / AUTH_URL is auto-derivable, but pin it after first deploy
+      # to your render URL if OAuth redirects misbehave:
+      # - key: AUTH_URL
+      #   value: https://brutha.onrender.com
+      # ---- Optional model tuning ----
+      - key: XAI_MODEL
+        value: grok-3
+      - key: NODE_ENV
+        value: production
+      # ---- Optional: OAuth providers (leave unset to use email/password) ----
+      # - key: AUTH_GITHUB_ID
+      #   sync: false
+      # - key: AUTH_GITHUB_SECRET
+      #   sync: false
+      # - key: AUTH_GOOGLE_ID
+      #   sync: false
+      # - key: AUTH_GOOGLE_SECRET
+      #   sync: false
+      # ---- Optional: SMTP for the email tool ----
+      # - key: SMTP_HOST
+      #   sync: false
+      # - key: SMTP_PORT
+      #   value: "587"
+      # - key: SMTP_USER
+      #   sync: false
+      # - key: SMTP_PASS
+      #   sync: false
+      # - key: SMTP_FROM
+      #   sync: false

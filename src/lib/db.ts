@@ -245,7 +245,24 @@ function runMigrations(d: Database.Database): void {
 export function getDb(): Database.Database {
   if (db) return db;
 
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  // Ensure the data directory exists and is writable. On serverless platforms
+  // (Vercel) or misconfigured container volumes the filesystem is read-only or
+  // owned by another uid — fail with an actionable message instead of a cryptic
+  // SQLITE_CANTOPEN surfacing as a 500 deep inside a route.
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.accessSync(DATA_DIR, fs.constants.W_OK);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Data directory '${DATA_DIR}' is not writable (${detail}). ` +
+        `BRUTHA stores its SQLite DB and uploads here and needs a PERSISTENT, ` +
+        `WRITABLE disk. This will NOT work on Vercel/serverless (read-only FS). ` +
+        `Deploy on a host with a writable volume mounted at this path, owned by ` +
+        `the runtime user (uid 1001 in the provided Docker image). See DEPLOYMENT.md.`
+    );
+  }
+
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
 
