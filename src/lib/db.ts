@@ -78,7 +78,75 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: "settings-kv",
+    up: (d) => {
+      // Generic key/value settings store. Used today for the email "from"
+      // identity configured during onboarding. The `scope` column is forward-
+      // looking: it defaults to 'global' (single-operator), but once a real
+      // users/auth system exists, per-user settings can be stored by setting
+      // scope to a user id — no schema change required.
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS settings (
+          scope     TEXT NOT NULL DEFAULT 'global',
+          key       TEXT NOT NULL,
+          value     TEXT NOT NULL,
+          updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (scope, key)
+        );
+      `);
+    },
+  },
+  {
+    version: 3,
+    name: "workers",
+    up: (d) => {
+      // BRUTHA Workers: background agent jobs created from natural language.
+      // Each row is a task the agent runs autonomously in the background. The
+      // app polls / lists these; status transitions queued -> running ->
+      // done|error.
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS workers (
+          id        TEXT PRIMARY KEY,
+          scope     TEXT NOT NULL DEFAULT 'global',
+          title     TEXT NOT NULL,
+          task      TEXT NOT NULL,
+          status    TEXT NOT NULL DEFAULT 'queued',
+          result    TEXT,
+          error     TEXT,
+          createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+          updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS workers_scope_status
+          ON workers (scope, status);
+      `);
+    },
+  },
 ];
+
+/**
+ * Read a single setting value for a scope (defaults to the global/operator
+ * scope). Returns null when unset. Scope is forward-looking: pass a user id
+ * once auth exists to get per-user settings.
+ */
+export function getSetting(key: string, scope = "global"): string | null {
+  const row = getDb()
+    .prepare("SELECT value FROM settings WHERE scope = ? AND key = ?")
+    .get(scope, key) as { value: string } | undefined;
+  return row ? row.value : null;
+}
+
+/** Upsert a single setting value for a scope. */
+export function setSetting(key: string, value: string, scope = "global"): void {
+  getDb()
+    .prepare(
+      `INSERT INTO settings (scope, key, value, updatedAt)
+       VALUES (@scope, @key, @value, datetime('now'))
+       ON CONFLICT(scope, key) DO UPDATE SET value = @value, updatedAt = datetime('now')`
+    )
+    .run({ scope, key, value });
+}
 
 /** Read the current schema version (0 if the meta table is empty/new). */
 function getSchemaVersion(d: Database.Database): number {

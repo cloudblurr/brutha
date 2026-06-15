@@ -4,7 +4,6 @@ import { useChat } from "@ai-sdk/react";
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,8 +11,6 @@ import {
 import { Markdown } from "./Markdown";
 import { t } from "@/lib/i18n";
 import {
-  ArrowUp,
-  Stop,
   Plus,
   Trash,
   Sidebar as SidebarIcon,
@@ -23,7 +20,17 @@ import {
   Sun,
   Moon,
   Wrench,
+  ToolGlyph,
+  Settings as SettingsIcon,
 } from "./icons";
+import { Composer, type Attachment, type Features } from "./Composer";
+import { ConfirmationCard } from "./ConfirmationCard";
+import { WorkersPanel } from "./WorkersPanel";
+import {
+  SettingsModal,
+  AccountButton,
+  useMockAuth,
+} from "./Settings";
 
 const SUGGESTIONS = [
   {
@@ -97,7 +104,17 @@ export default function Home() {
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [hydrated, setHydrated] = useState(false);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // New feature state.
+  const [features, setFeatures] = useState<Features>({
+    webSearch: true,
+    imageGen: false,
+    workers: true,
+  });
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [workersOpen, setWorkersOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const auth = useMockAuth();
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -166,38 +183,45 @@ export default function Home() {
   }, [messages, busy, hydrated]);
 
   const submit = useCallback(
-    (text: string) => {
+    (text: string, atts: Attachment[] = []) => {
       const value = text.trim();
-      if (!value || busy) return;
+      if ((!value && atts.length === 0) || busy) return;
       // Open a new conversation lazily on first message.
       if (!activeId) setActiveId(uid());
-      sendMessage({ text: value });
+
+      // Fold attachment context into the message so the agent can use it.
+      let composed = value;
+      if (atts.length > 0) {
+        const lines = atts.map((a) => {
+          if (a.isImage) return `[Image attached: ${a.name} -> ${a.url}]`;
+          if (a.text)
+            return `[File attached: ${a.name}]\n\`\`\`\n${a.text}\n\`\`\``;
+          return `[File attached: ${a.name} -> ${a.url}]`;
+        });
+        composed = (value ? value + "\n\n" : "") + lines.join("\n\n");
+      }
+
+      sendMessage({ text: composed }, { body: { features } });
       setInput("");
-      requestAnimationFrame(() => {
-        if (textareaRef.current) textareaRef.current.style.height = "auto";
-      });
     },
-    [busy, sendMessage, activeId],
+    [busy, sendMessage, activeId, features],
   );
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    submit(input);
-  }
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submit(input);
-    }
-  }
+  // Send a follow-up instruction from a confirmation card (confirm / cancel).
+  const confirmAction = useCallback(
+    (instruction: string) => {
+      if (busy) return;
+      sendMessage({ text: instruction }, { body: { features } });
+    },
+    [busy, sendMessage, features],
+  );
 
   function newChat() {
     if (busy) return;
     setActiveId(null);
     setMessages([]);
     setInput("");
-    textareaRef.current?.focus();
+    setAttachments([]);
     if (window.innerWidth < 768) setSidebarOpen(false);
   }
 
@@ -216,14 +240,6 @@ export default function Home() {
       setMessages([]);
     }
   }
-
-  // Auto-grow the textarea up to a max height.
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 200) + "px";
-  }, [input]);
 
   // Auto-scroll to the newest content as it streams in.
   useEffect(() => {
@@ -365,6 +381,23 @@ export default function Home() {
             <span className="hidden text-xs text-[var(--fg-muted)] sm:inline">
               {busy ? t("status.thinking") : t("status.online")}
             </span>
+            <button
+              type="button"
+              onClick={() => setWorkersOpen(true)}
+              aria-label="Open workers"
+              className="msg-action ml-1 grid h-9 w-9 place-items-center"
+            >
+              <Wrench className="h-[16px] w-[16px]" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Open settings"
+              className="msg-action grid h-9 w-9 place-items-center"
+            >
+              <SettingsIcon className="h-[18px] w-[18px]" />
+            </button>
+            <AccountButton user={auth.user} onOpen={() => setSettingsOpen(true)} />
           </div>
         </header>
 
@@ -388,6 +421,7 @@ export default function Home() {
                     isLast={i === messages.length - 1}
                     busy={busy}
                     onRegenerate={() => regenerate()}
+                    onConfirm={confirmAction}
                   />
                 ))}
                 {status === "submitted" && <ThinkingRow />}
@@ -404,49 +438,35 @@ export default function Home() {
 
         {/* Composer */}
         <div className="px-4 pb-4 pt-1 sm:px-6">
-          <form
-            onSubmit={onSubmit}
-            className="composer mx-auto flex w-full max-w-3xl items-end gap-2 rounded-[26px] border p-2 pl-4 transition-shadow"
-            style={{
-              background: "var(--composer-bg)",
-              borderColor: "var(--composer-border)",
-            }}
-          >
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              rows={1}
-              aria-label="Message BRUTHA"
-              placeholder="Message BRUTHA…"
-              className="max-h-[200px] flex-1 resize-none bg-transparent py-2.5 text-[15px] leading-relaxed outline-none placeholder:text-[var(--fg-subtle)]"
-            />
-            {busy ? (
-              <button
-                type="button"
-                onClick={stop}
-                aria-label="Stop generating"
-                className="btn-send grid h-9 w-9 shrink-0 place-items-center rounded-full"
-              >
-                <Stop className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!input.trim()}
-                aria-label="Send message"
-                className="btn-send grid h-9 w-9 shrink-0 place-items-center rounded-full disabled:cursor-not-allowed disabled:opacity-25"
-              >
-                <ArrowUp className="h-[18px] w-[18px]" />
-              </button>
-            )}
-          </form>
+          <Composer
+            input={input}
+            setInput={setInput}
+            busy={busy}
+            onSubmit={submit}
+            onStop={stop}
+            features={features}
+            setFeatures={setFeatures}
+            attachments={attachments}
+            setAttachments={setAttachments}
+            onOpenWorkers={() => setWorkersOpen(true)}
+          />
           <p className="mt-2 text-center text-[11px] text-[var(--fg-subtle)]">
             {t("composer.disclaimer")}
           </p>
         </div>
       </div>
+
+      {/* Workers panel + Settings modal */}
+      <WorkersPanel open={workersOpen} onClose={() => setWorkersOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        user={auth.user}
+        signIn={auth.signIn}
+        signOut={auth.signOut}
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+      />
     </div>
   );
 }
@@ -492,11 +512,13 @@ function MessageRow({
   isLast,
   busy,
   onRegenerate,
+  onConfirm,
 }: {
   message: UIMessage;
   isLast: boolean;
   busy: boolean;
   onRegenerate: () => void;
+  onConfirm: (instruction: string) => void;
 }) {
   const isUser = message.role === "user";
 
@@ -527,11 +549,65 @@ function MessageRow({
               return <Markdown key={i} content={part.text} />;
             }
             if (part.type.startsWith("tool-")) {
+              const name = part.type.replace("tool-", "");
+              const p = part as {
+                state?: string;
+                output?: unknown;
+              };
+              const output = p.output as
+                | {
+                    needsConfirmation?: boolean;
+                    action?: string;
+                    summary?: string;
+                    details?: Record<string, unknown>;
+                    url?: string;
+                    created?: boolean;
+                  }
+                | undefined;
+
+              // Confirmation card for sensitive actions awaiting approval.
+              if (output?.needsConfirmation) {
+                return (
+                  <ConfirmationCard
+                    key={i}
+                    request={{
+                      action: output.action ?? name,
+                      summary: output.summary ?? `Confirm ${name}`,
+                      details: output.details,
+                    }}
+                    onConfirm={() =>
+                      onConfirm(
+                        `Yes, I confirm. Proceed with the ${
+                          output.action ?? name
+                        } action now (set confirmed to true).`,
+                      )
+                    }
+                    onCancel={() =>
+                      onConfirm(`No, cancel the ${output.action ?? name} action. Do not proceed.`)
+                    }
+                  />
+                );
+              }
+
+              // Inline render for generated images.
+              if (output?.created && output.url) {
+                return (
+                  <div key={i} className="space-y-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={output.url}
+                      alt="Generated image"
+                      className="max-h-96 w-auto rounded-xl border"
+                    />
+                  </div>
+                );
+              }
+
               return (
                 <ToolChip
                   key={i}
-                  name={part.type.replace("tool-", "")}
-                  state={(part as { state?: string }).state ?? "output-available"}
+                  name={name}
+                  state={p.state ?? "output-available"}
                 />
               );
             }
@@ -605,7 +681,7 @@ function ToolChip({ name, state }: { name: string; state: string }) {
         aria-hidden
         className="inline-flex items-center gap-1 rounded bg-[color-mix(in_oklab,var(--accent,#6366f1)_22%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent,#6366f1)]"
       >
-        <Wrench className="h-[11px] w-[11px]" />
+        <ToolGlyph name={name} running={running} />
         tool
       </span>
       <span className="text-[var(--fg)]">{name}</span>

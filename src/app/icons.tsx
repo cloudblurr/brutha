@@ -104,3 +104,109 @@ export function Wrench({ className }: P) {
     </svg>
   );
 }
+
+export function Sparkles({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+      <path d="m6.3 6.3 2.1 2.1M15.6 15.6l2.1 2.1M17.7 6.3l-2.1 2.1M8.4 15.6l-2.1 2.1" />
+    </svg>
+  );
+}
+
+export function Paperclip({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <path d="M21.4 11.05 12.25 20.2a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 0 1 4.24 4.24l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.49-8.49" />
+    </svg>
+  );
+}
+
+export function Globe({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </svg>
+  );
+}
+
+export function ImageIcon({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="9" cy="9" r="1.6" />
+      <path d="m21 15-5-5L5 21" />
+    </svg>
+  );
+}
+
+export function Bot({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <rect x="4" y="8" width="16" height="11" rx="2.5" />
+      <path d="M12 4v4M8 13h.01M16 13h.01M9 19v2M15 19v2" />
+    </svg>
+  );
+}
+
+export function Settings({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" />
+    </svg>
+  );
+}
+
+export function User({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </svg>
+  );
+}
+
+export function X({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
+export function LogIn({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+    </svg>
+  );
+}
+
+export function LogOut({ className }: P) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+    </svg>
+  );
+}
+
+/* ---- Animated, tool-specific icons (CSS keyframes in globals.css). ---- */
+
+/** Map a tool name to an animated icon for the ToolChip. */
+export function ToolGlyph({ name, running }: { name: string; running: boolean }) {
+  const cls = "h-[13px] w-[13px] " + (running ? "tool-glyph-spin" : "");
+  const n = name.toLowerCase();
+  if (n.includes("image") || n.includes("generateimage")) return <ImageIcon className={cls} />;
+  if (n.includes("worker")) return <Bot className={cls} />;
+  if (n.includes("weather") || n.includes("forecast")) return <Sun className={cls} />;
+  if (n.includes("email") || n.includes("mail")) return <Paperclip className={cls} />;
+  if (
+    n.includes("web") || n.includes("url") || n.includes("wiki") ||
+    n.includes("news") || n.includes("search") || n.includes("crypto") ||
+    n.includes("currency") || n.includes("country") || n.includes("ip")
+  )
+    return <Globe className={cls} />;
+  return <Wrench className={cls} />;
+}

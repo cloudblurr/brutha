@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { getSetting } from "./db";
 
 /**
  * Email sending via SMTP. Configured entirely through environment variables
@@ -12,7 +13,29 @@ import nodemailer, { type Transporter } from "nodemailer";
  *
  * If these are not set, the agent's sendEmail tool reports that email is
  * not configured instead of crashing.
+ *
+ * The "From" identity (display name + address shown to recipients) can be
+ * overridden per scope at runtime via the `settings` table (key
+ * "email.from"), configured during onboarding. This lets the operator — and
+ * later, per-user once auth exists — set their own sender identity without
+ * touching env or redeploying. SMTP transport credentials (host/auth) still
+ * come from env; only the visible From line is overridable here.
  */
+
+/**
+ * Resolve the "From" header. Prefers the onboarding-configured identity stored
+ * in the settings table, falling back to SMTP_FROM, then SMTP_USER. The `scope`
+ * is forward-looking for per-user identities once auth lands.
+ */
+export function getEmailIdentity(scope = "global"): string | undefined {
+  try {
+    const stored = getSetting("email.from", scope);
+    if (stored && stored.trim()) return stored.trim();
+  } catch {
+    // DB not ready / migration not run yet — fall back to env silently.
+  }
+  return process.env.SMTP_FROM || process.env.SMTP_USER;
+}
 
 export function isEmailConfigured(): boolean {
   return Boolean(
@@ -46,7 +69,7 @@ export async function sendEmail(opts: {
   body: string;
 }): Promise<{ messageId: string; accepted: string[] }> {
   const info = await getTransporter().sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from: getEmailIdentity(),
     to: opts.to,
     subject: opts.subject,
     text: opts.body,

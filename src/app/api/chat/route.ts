@@ -3,7 +3,8 @@ import {
   type UIMessage,
   type ModelMessage,
 } from "ai";
-import { grokAgent } from "@/lib/agent";
+import { buildAgent } from "@/lib/agent";
+import type { FeatureFlags } from "@/lib/tool-registry";
 import { runDurableAgent, isTemporalEnabled } from "@/lib/temporal/run";
 import { getEnvError } from "@/lib/env";
 import { logger, newRequestId } from "@/lib/logger";
@@ -30,10 +31,15 @@ export async function POST(req: Request) {
   }
 
   let messages: UIMessage[];
+  let features: Partial<FeatureFlags> | undefined;
   try {
     const body = await req.json();
     messages = body.messages;
     if (!Array.isArray(messages)) throw new Error("messages must be an array");
+    // Optional per-request feature flags from the composer toggles.
+    if (body.features && typeof body.features === "object") {
+      features = body.features as Partial<FeatureFlags>;
+    }
   } catch {
     logger.warn({ requestId }, "invalid request body");
     return new Response(JSON.stringify({ error: "Invalid request body." }), {
@@ -83,7 +89,8 @@ export async function POST(req: Request) {
   }
 
   // --- Streaming path (default) ------------------------------------------
-  const result = await grokAgent.stream({ messages: modelMessages });
+  const agent = buildAgent(undefined, features);
+  const result = await agent.stream({ messages: modelMessages });
   return result.toUIMessageStreamResponse({
     // S1.3: never leak raw stack traces to the client; send a friendly
     // fallback message if the stream errors mid-flight.

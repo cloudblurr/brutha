@@ -6,6 +6,8 @@ import { emailTools } from "./tools/email";
 import { dateTools } from "./tools/datetime";
 import { textTools } from "./tools/text";
 import { extraTools } from "./tools/extras";
+import { imageTools } from "./tools/image";
+import { workerTools } from "./tools/workers";
 
 /**
  * Tool registry & plugin hook (S11).
@@ -29,10 +31,47 @@ export const toolCategories: Record<string, ToolMap> = {
   datetime: dateTools,
   text: textTools,
   extras: extraTools,
+  image: imageTools,
+  workers: workerTools,
 };
+
+/**
+ * Per-request feature flags toggled from the UI (composer toggles). Default to
+ * the always-on baseline; web/image/workers categories are gated by these.
+ */
+export interface FeatureFlags {
+  webSearch: boolean;
+  imageGen: boolean;
+  workers: boolean;
+}
+
+export const DEFAULT_FEATURES: FeatureFlags = {
+  webSearch: true,
+  imageGen: false,
+  workers: true,
+};
+
+// Categories that are always available regardless of feature flags.
+const ALWAYS_ON = ["utility", "storage", "email", "datetime", "text", "extras"];
 
 // Plugin-registered tools (populated via registerTool at startup).
 const pluginTools: ToolMap = {};
+
+/**
+ * Compose the tool set for a request given its feature flags. Feature-gated
+ * categories (web/image/workers) are only included when their flag is on, so
+ * the model never sees — and cannot call — a disabled capability.
+ */
+export function getToolsForFeatures(
+  features: Partial<FeatureFlags> = {}
+): ToolMap {
+  const f = { ...DEFAULT_FEATURES, ...features };
+  const maps: ToolMap[] = ALWAYS_ON.map((c) => toolCategories[c]);
+  if (f.webSearch) maps.push(toolCategories.web);
+  if (f.imageGen) maps.push(toolCategories.image);
+  if (f.workers) maps.push(toolCategories.workers);
+  return Object.assign({}, ...maps, pluginTools) as ToolMap;
+}
 
 /**
  * Register an external tool by name. Throws on name collision so plugins can't

@@ -6,7 +6,7 @@ import {
   type ModelMessage,
 } from "ai";
 import { xai } from "@ai-sdk/xai";
-import { getAllTools } from "./tool-registry";
+import { getAllTools, getToolsForFeatures, type FeatureFlags } from "./tool-registry";
 
 /**
  * All tools the agent can use, composed via the tool registry (src/lib/
@@ -80,6 +80,8 @@ Prefer using a tool over guessing. Highlights of what you can do:
 - Generators: generatePassword, generateUuid, hashText, encodeBase64, qrCode, randomNumber, rollDice.
 - Health/fun: calculateBmi, getJoke, getQuote, activitySuggestion.
 - Email: sendEmail (defaults to the configured test recipient; reports if not configured).
+- Image generation (when enabled): generateImage — create a picture from a text prompt. Only call when the user explicitly asks for an image; return the URL.
+- Background work (when enabled): createWorker / listWorkers / getWorkerResult — spawn a BRUTHA Worker for tasks the user wants done "in the background" and report the worker id, then let them check back.
 
 Tool-routing guidance:
 - Pick the single most specific tool for the request. Do not chain tools you do not need.
@@ -94,12 +96,15 @@ Tool-routing guidance:
 - If a tool returns an error, tell the user clearly and suggest a fix.
 - Be concise, friendly, and accurate. If you truly can't help, say so honestly.`;
 
-/** Build a fresh ToolLoopAgent for the given (resolved) config. */
-export function buildAgent(config: AgentConfig = resolveAgentConfig()) {
+/** Build a fresh ToolLoopAgent for the given (resolved) config + features. */
+export function buildAgent(
+  config: AgentConfig = resolveAgentConfig(),
+  features?: Partial<FeatureFlags>
+) {
   return new ToolLoopAgent({
     model: xai(config.model),
     instructions: SYSTEM_PROMPT,
-    tools,
+    tools: features ? getToolsForFeatures(features) : tools,
     temperature: config.temperature,
     stopWhen: stepCountIs(config.maxSteps),
   });

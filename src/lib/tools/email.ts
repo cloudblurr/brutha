@@ -9,7 +9,7 @@ const DEFAULT_TEST_RECIPIENT = process.env.TEST_EMAIL_TO || "";
 export const emailTools = {
   sendEmail: tool({
     description:
-      "Send an email. If 'to' is omitted, sends to the configured default test recipient (TEST_EMAIL_TO). Confirm recipient, subject, and body with the user if anything is ambiguous.",
+      "Send an email. If 'to' is omitted, sends to the configured default test recipient (TEST_EMAIL_TO). This is a sensitive action: unless 'confirmed' is true, it returns a confirmation request that the UI shows as a card — do NOT set confirmed yourself; only the user confirms via the card.",
     inputSchema: z.object({
       to: z
         .string()
@@ -19,8 +19,14 @@ export const emailTools = {
         ),
       subject: z.string(),
       body: z.string(),
+      confirmed: z
+        .boolean()
+        .optional()
+        .describe(
+          "Set to true ONLY after the user has approved sending via the confirmation card. Never set this on the first call."
+        ),
     }),
-    execute: async ({ to, subject, body }) => {
+    execute: async ({ to, subject, body, confirmed }) => {
       const recipient = to || DEFAULT_TEST_RECIPIENT;
       if (!isEmailConfigured()) {
         return {
@@ -37,6 +43,17 @@ export const emailTools = {
       }
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient)) {
         return { error: `'${recipient}' is not a valid email address.` };
+      }
+      // Confirmation gate: surface a card to the user before actually sending.
+      if (!confirmed) {
+        return {
+          needsConfirmation: true,
+          action: "sendEmail",
+          summary: `Send an email to ${recipient}`,
+          details: { to: recipient, subject, body },
+          message:
+            "Awaiting user confirmation. Show the confirmation card and do not send until the user approves.",
+        };
       }
       try {
         const result = await sendEmail({ to: recipient, subject, body });
