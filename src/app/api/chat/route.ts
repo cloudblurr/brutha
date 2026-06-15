@@ -5,6 +5,8 @@ import {
 } from "ai";
 import { grokAgent } from "@/lib/agent";
 import { runDurableAgent, isTemporalEnabled } from "@/lib/temporal/run";
+import { getEnvError } from "@/lib/env";
+import { logger, newRequestId } from "@/lib/logger";
 
 // Stream responses; this route runs on the Node.js runtime (required for
 // better-sqlite3 and nodemailer).
@@ -12,11 +14,16 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  if (!process.env.XAI_API_KEY) {
+  const requestId = newRequestId();
+  const startedAt = Date.now();
+
+  // S5: validate environment up front; fail fast with a clear message.
+  const envError = getEnvError();
+  if (envError) {
+    logger.error({ requestId, envError }, "env validation failed");
     return new Response(
       JSON.stringify({
-        error:
-          "XAI_API_KEY is not set. Copy .env.example to .env.local and add your key.",
+        error: `Server is misconfigured (${envError}). Copy .env.example to .env.local and add your key.`,
       }),
       { status: 500, headers: { "content-type": "application/json" } }
     );
@@ -28,6 +35,7 @@ export async function POST(req: Request) {
     messages = body.messages;
     if (!Array.isArray(messages)) throw new Error("messages must be an array");
   } catch {
+    logger.warn({ requestId }, "invalid request body");
     return new Response(JSON.stringify({ error: "Invalid request body." }), {
       status: 400,
       headers: { "content-type": "application/json" },
@@ -35,6 +43,10 @@ export async function POST(req: Request) {
   }
 
   const modelMessages: ModelMessage[] = await convertToModelMessages(messages);
+  logger.info(
+    { requestId, messages: modelMessages.length, durable: isTemporalEnabled() },
+    "chat request"
+  );
 
   // --- Durable path -------------------------------------------------------
   // When Temporal is configured (TEMPORAL_ADDRESS/API key, or an explicit
@@ -44,6 +56,10 @@ export async function POST(req: Request) {
   if (isTemporalEnabled()) {
     try {
       const result = await runDurableAgent(modelMessages);
+      logger.info(
+        { requestId, workflowId: result.workflowId, ms: Date.now() - startedAt },
+        "durable run ok"
+      );
       return new Response(
         JSON.stringify({
           text: result.text,
@@ -56,14 +72,30 @@ export async function POST(req: Request) {
     } catch (err) {
       // Fall through to streaming mode if Temporal is misconfigured/unreachable
       // so the chat keeps working instead of hard-failing.
-      console.error(
-        "[chat] durable execution failed, falling back to streaming:",
-        err instanceof Error ? err.message : err
+      logger.error(
+        {
+          requestId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        "durable execution failed, falling back to streaming"
       );
     }
   }
 
   // --- Streaming path (default) ------------------------------------------
   const result = await grokAgent.stream({ messages: modelMessages });
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse({
+    // S1.3: never leak raw stack traces to the client; send a friendly
+    // fallback message if the stream errors mid-flight.
+    onError: (error) => {
+      logger.error(
+        {
+          requestId,
+          err: error instanceof Error ? error.stack ?? error.message : error,
+        },
+        "streaming error"
+      );
+      return "Sorry, I ran into a problem. Please try again.";
+    },
+  });
 }

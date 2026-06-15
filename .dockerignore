@@ -1,0 +1,12 @@
+# Ignore everything not needed in the Docker build context.
+node_modules
+.next
+.git
+.github
+data
+*.md
+.env*
+!.env.example
+coverage
+.vscode
+.idea

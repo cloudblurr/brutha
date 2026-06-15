@@ -1,0 +1,13 @@
+{
+  "app.tagline": "An agentic assistant with 50+ built-in tools — math, weather, web knowledge, memory, and more.",
+  "hero.title": "How can I help you today?",
+  "composer.placeholder": "Message BRUTHA…",
+  "composer.disclaimer": "BRUTHA can use tools and may make mistakes. Verify important info.",
+  "status.thinking": "Thinking…",
+  "status.online": "Online",
+  "sidebar.newChat": "New chat",
+  "sidebar.recent": "Recent",
+  "sidebar.empty": "No conversations yet.",
+  "theme.light": "Light mode",
+  "theme.dark": "Dark mode"
+}

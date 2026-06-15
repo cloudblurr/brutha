@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { cached } from "./_cache";
 
 function errMsg(e: unknown) {
   return e instanceof Error ? e.message : String(e);
@@ -17,25 +18,28 @@ export const webTools = {
     inputSchema: z.object({ location: z.string() }),
     execute: async ({ location }) => {
       try {
-        const geo = await getJson(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
-            location
-          )}&count=1`
-        );
-        const place = geo?.results?.[0];
-        if (!place) return { error: `Could not find location: ${location}` };
-        const wx = await getJson(
-          `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`
-        );
-        const c = wx?.current;
-        if (!c) return { error: "Weather data unavailable." };
-        return {
-          location: `${place.name}, ${place.country ?? ""}`.trim(),
-          temperatureC: c.temperature_2m,
-          humidityPercent: c.relative_humidity_2m,
-          windSpeedKmh: c.wind_speed_10m,
-          weatherCode: c.weather_code,
-        };
+        // S7: cache + single-flight identical weather lookups for 5 min.
+        return await cached(`weather:${location.toLowerCase().trim()}`, async () => {
+          const geo = await getJson(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+              location
+            )}&count=1`
+          );
+          const place = geo?.results?.[0];
+          if (!place) return { error: `Could not find location: ${location}` };
+          const wx = await getJson(
+            `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`
+          );
+          const c = wx?.current;
+          if (!c) return { error: "Weather data unavailable." };
+          return {
+            location: `${place.name}, ${place.country ?? ""}`.trim(),
+            temperatureC: c.temperature_2m,
+            humidityPercent: c.relative_humidity_2m,
+            windSpeedKmh: c.wind_speed_10m,
+            weatherCode: c.weather_code,
+          };
+        });
       } catch (e) {
         return { error: `Failed to fetch weather: ${errMsg(e)}` };
       }
@@ -82,29 +86,32 @@ export const webTools = {
     inputSchema: z.object({ url: z.string().url() }),
     execute: async ({ url }) => {
       try {
-        const res = await fetch(url, {
-          headers: { "User-Agent": "GrokAgent/1.0" },
-          signal: AbortSignal.timeout(15000),
+        // S7: cache + single-flight identical URL fetches for 5 min.
+        return await cached(`fetchUrl:${url}`, async () => {
+          const res = await fetch(url, {
+            headers: { "User-Agent": "GrokAgent/1.0" },
+            signal: AbortSignal.timeout(15000),
+          });
+          const ct = res.headers.get("content-type") ?? "";
+          let text = await res.text();
+          if (ct.includes("text/html")) {
+            // Strip tags for a rough readable view.
+            text = text
+              .replace(/<script[\s\S]*?<\/script>/gi, "")
+              .replace(/<style[\s\S]*?<\/style>/gi, "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+          }
+          const limit = 4000;
+          return {
+            url,
+            status: res.status,
+            contentType: ct,
+            truncated: text.length > limit,
+            content: text.slice(0, limit),
+          };
         });
-        const ct = res.headers.get("content-type") ?? "";
-        let text = await res.text();
-        if (ct.includes("text/html")) {
-          // Strip tags for a rough readable view.
-          text = text
-            .replace(/<script[\s\S]*?<\/script>/gi, "")
-            .replace(/<style[\s\S]*?<\/style>/gi, "")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-        }
-        const limit = 4000;
-        return {
-          url,
-          status: res.status,
-          contentType: ct,
-          truncated: text.length > limit,
-          content: text.slice(0, limit),
-        };
       } catch (e) {
         return { error: `Failed to fetch URL: ${errMsg(e)}` };
       }

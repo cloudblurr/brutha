@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { Markdown } from "./Markdown";
+import { t } from "@/lib/i18n";
 import {
   ArrowUp,
   Stop,
@@ -362,13 +363,19 @@ export default function Home() {
               }
             />
             <span className="hidden text-xs text-[var(--fg-muted)] sm:inline">
-              {busy ? "Thinking…" : "Online"}
+              {busy ? t("status.thinking") : t("status.online")}
             </span>
           </div>
         </header>
 
         {/* Conversation */}
-        <main ref={scrollRef} className="scroll-area relative flex-1 overflow-y-auto">
+        <main
+          ref={scrollRef}
+          role="log"
+          aria-label="Conversation"
+          aria-live="polite"
+          className="scroll-area relative flex-1 overflow-y-auto"
+        >
           {empty ? (
             <Hero onPick={submit} />
           ) : (
@@ -411,6 +418,7 @@ export default function Home() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               rows={1}
+              aria-label="Message BRUTHA"
               placeholder="Message BRUTHA…"
               className="max-h-[200px] flex-1 resize-none bg-transparent py-2.5 text-[15px] leading-relaxed outline-none placeholder:text-[var(--fg-subtle)]"
             />
@@ -435,7 +443,7 @@ export default function Home() {
             )}
           </form>
           <p className="mt-2 text-center text-[11px] text-[var(--fg-subtle)]">
-            BRUTHA can use tools and may make mistakes. Verify important info.
+            {t("composer.disclaimer")}
           </p>
         </div>
       </div>
@@ -450,11 +458,10 @@ function Hero({ onPick }: { onPick: (t: string) => void }) {
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col items-center justify-center px-4 pb-16 text-center">
       <div className="orb mb-6 h-14 w-14 rounded-[18px]" aria-hidden />
       <h2 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
-        How can I help you today?
+        {t("hero.title")}
       </h2>
       <p className="mt-2 max-w-md text-sm text-[var(--fg-muted)]">
-        An agentic assistant with 50+ built-in tools — math, weather, web
-        knowledge, memory, and more.
+        {t("app.tagline")}
       </p>
 
       <div className="mt-8 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -577,13 +584,30 @@ function ToolChip({ name, state }: { name: string; state: string }) {
   const running = state === "input-streaming" || state === "input-available";
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-label={`Tool ${name} ${running ? "running" : "completed"}`}
       className={
         "tool-chip inline-flex w-fit items-center gap-2 rounded-lg border px-2.5 py-1.5 font-mono text-xs text-[var(--fg-muted)] " +
         (running ? "running" : "")
       }
-      style={{ background: "var(--hover)" }}
+      style={{
+        // S9: distinguish tool-generated activity with a subtle accent badge.
+        background: running
+          ? "color-mix(in oklab, var(--accent, #6366f1) 14%, var(--hover))"
+          : "var(--hover)",
+        borderColor: running
+          ? "color-mix(in oklab, var(--accent, #6366f1) 35%, transparent)"
+          : undefined,
+      }}
     >
-      <Wrench className="h-[13px] w-[13px]" />
+      <span
+        aria-hidden
+        className="inline-flex items-center gap-1 rounded bg-[color-mix(in_oklab,var(--accent,#6366f1)_22%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent,#6366f1)]"
+      >
+        <Wrench className="h-[11px] w-[11px]" />
+        tool
+      </span>
       <span className="text-[var(--fg)]">{name}</span>
       <span className="text-[var(--fg-subtle)]">{running ? "running…" : "done"}</span>
     </div>

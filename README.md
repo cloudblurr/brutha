@@ -180,6 +180,59 @@ The system prompt also carries explicit **tool-routing guidance** (pick the
 most specific tool, prefer tools over stale memory for live data, reuse prior
 results, ask one clarifying question instead of guessing missing args).
 
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["Chat UI<br/>(page.tsx)"] -->|POST /api/chat| API["API route"]
+    API -->|env valid?| ENV["env.ts (zod)"]
+    API -->|durable?| TEMPORAL["Temporal workflow<br/>+ worker"]
+    API -->|stream| AGENT["grokAgent<br/>(ToolLoopAgent)"]
+    TEMPORAL --> AGENT
+    AGENT --> REG["tool-registry"]
+    REG --> TOOLS["50+ tools<br/>(utility/web/storage/...)"]
+    TOOLS --> EXT["External APIs<br/>(open-meteo, wiki, ...)"]
+    TOOLS --> DB["SQLite<br/>(db.ts + migrations)"]
+    AGENT --> LOG["pino logging"]
+```
+
+## Running tests
+
+Unit and integration tests use [Vitest](https://vitest.dev):
+
+```bash
+npm test            # run once
+npm run test:watch  # watch mode
+npm run test:coverage
+```
+
+Tests live next to the code (`src/**/*.test.ts`) and under `tests/`. They cover
+the tool error helpers, the LRU cache's single-flight behavior, env validation,
+the tool registry/manifest, i18n, and the `/api/chat` route's validation
+branches (no live model call required).
+
+## Tool discovery
+
+Every registered tool is listed at `/admin/tools` (a hidden, noindex page) and
+as JSON at `/api/tools`. Add tools via the registry's `registerTool` hook or by
+extending a category module under `src/lib/tools/`.
+
+## Docker
+
+```bash
+docker compose up --build      # builds the standalone image and runs on :3000
+```
+
+Set `XAI_API_KEY` in your shell or a local `.env` file first. The SQLite database
+is persisted in the `brutha-data` volume.
+
+## Internationalization
+
+UI strings live in `locales/*.json`. The active locale is resolved from the
+browser language (or `APP_LOCALE` on the server) via `src/lib/i18n.ts`. English
+and Spanish ship by default; add a catalog and extend `SUPPORTED_LOCALES` to add
+more.
+
 ## Adding your own tools
 
 Add an entry to the `tools` object in `src/lib/agent.ts`:

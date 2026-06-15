@@ -6,16 +6,14 @@ import {
   type ModelMessage,
 } from "ai";
 import { xai } from "@ai-sdk/xai";
-import { utilityTools } from "./tools/utility";
-import { webTools } from "./tools/web";
-import { storageTools } from "./tools/storage";
-import { emailTools } from "./tools/email";
-import { dateTools } from "./tools/datetime";
-import { textTools } from "./tools/text";
-import { extraTools } from "./tools/extras";
+import { getAllTools } from "./tool-registry";
 
 /**
- * All tools the agent can use, composed from category modules:
+ * All tools the agent can use, composed via the tool registry (src/lib/
+ * tool-registry.ts). The registry groups built-in tools by category and
+ * supports plugin-registered tools through `registerTool`.
+ *
+ * Categories:
  *  - utility:  calculate, conversions, password, hash, base64, uuid, random,
  *              dice, qr, color, text counting
  *  - web:      weather, forecast, fetchUrl, wikipedia, dictionary, currency,
@@ -30,15 +28,7 @@ import { extraTools } from "./tools/extras";
  * Tools run on the server. Grok decides when to call them; the AI SDK executes
  * the matching `execute` fn and feeds the result back into the loop.
  */
-export const tools = {
-  ...utilityTools,
-  ...webTools,
-  ...storageTools,
-  ...emailTools,
-  ...dateTools,
-  ...textTools,
-  ...extraTools,
-};
+export const tools = getAllTools();
 
 /**
  * Agent-level tuning knobs (all overridable via environment).

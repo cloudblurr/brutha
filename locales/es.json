@@ -1,0 +1,13 @@
+{
+  "app.tagline": "Un asistente con más de 50 herramientas integradas: matemáticas, clima, conocimiento web, memoria y más.",
+  "hero.title": "¿En qué puedo ayudarte hoy?",
+  "composer.placeholder": "Escribe a BRUTHA…",
+  "composer.disclaimer": "BRUTHA usa herramientas y puede cometer errores. Verifica la información importante.",
+  "status.thinking": "Pensando…",
+  "status.online": "En línea",
+  "sidebar.newChat": "Nuevo chat",
+  "sidebar.recent": "Recientes",
+  "sidebar.empty": "Aún no hay conversaciones.",
+  "theme.light": "Modo claro",
+  "theme.dark": "Modo oscuro"
+}

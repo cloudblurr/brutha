@@ -1,0 +1,19 @@
+services:
+  brutha:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # Required: supply via a .env file or your shell (never commit secrets).
+      XAI_API_KEY: ${XAI_API_KEY:?set XAI_API_KEY in your environment or a .env file}
+      XAI_MODEL: ${XAI_MODEL:-grok-3}
+      NODE_ENV: production
+    volumes:
+      # Persist the SQLite database across container restarts.
+      - brutha-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  brutha-data:
