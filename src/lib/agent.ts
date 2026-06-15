@@ -1,4 +1,10 @@
-import { ToolLoopAgent, stepCountIs } from "ai";
+import {
+  ToolLoopAgent,
+  stepCountIs,
+  convertToModelMessages,
+  type UIMessage,
+  type ModelMessage,
+} from "ai";
 import { xai } from "@ai-sdk/xai";
 import { utilityTools } from "./tools/utility";
 import { webTools } from "./tools/web";
@@ -34,7 +40,43 @@ export const tools = {
   ...extraTools,
 };
 
-const SYSTEM_PROMPT = `You are BRUTHA, a highly capable AI assistant powered by xAI's Grok, with a large toolbox.
+/**
+ * Agent-level tuning knobs (all overridable via environment).
+ *
+ * These are the "fine-tuning" surface for BRUTHA: rather than training model
+ * weights (xAI does not expose Grok fine-tuning), we tune the agent's behavior
+ * — which model it uses, how deterministic it is, and how many tool/model
+ * steps it may take before stopping.
+ */
+export interface AgentConfig {
+  /** Grok model id, e.g. "grok-3", "grok-4". */
+  model: string;
+  /** Sampling temperature. Lower = more deterministic tool use. */
+  temperature: number;
+  /** Max number of model<->tool steps before the loop stops. */
+  maxSteps: number;
+}
+
+function numFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** Resolve agent config from environment with sane defaults. */
+export function resolveAgentConfig(
+  overrides: Partial<AgentConfig> = {}
+): AgentConfig {
+  return {
+    model: overrides.model ?? process.env.XAI_MODEL ?? "grok-3",
+    // Default to a low temperature so tool selection is stable and repeatable.
+    temperature: overrides.temperature ?? numFromEnv("AGENT_TEMPERATURE", 0.2),
+    maxSteps: overrides.maxSteps ?? numFromEnv("AGENT_MAX_STEPS", 14),
+  };
+}
+
+export const SYSTEM_PROMPT = `You are BRUTHA, a highly capable AI assistant powered by xAI's Grok, with a large toolbox.
 
 Prefer using a tool over guessing. Highlights of what you can do:
 - Math & conversions: calculate, convertUnits, convertCurrency, convertTimeZone, numberToWords.
@@ -49,15 +91,57 @@ Prefer using a tool over guessing. Highlights of what you can do:
 - Health/fun: calculateBmi, getJoke, getQuote, activitySuggestion.
 - Email: sendEmail (defaults to the configured test recipient; reports if not configured).
 
-Guidance:
-- If asked to email someone whose address you don't know, try findContact first.
+Tool-routing guidance:
+- Pick the single most specific tool for the request. Do not chain tools you do not need.
+- For anything involving live or factual data (prices, weather, time, definitions, web
+  pages), call the matching tool instead of answering from memory — your training data
+  may be stale.
+- Reuse results already in the conversation; do not re-call a tool for data you already have.
+- If asked to email someone whose address you don't know, call findContact first, then sendEmail.
+- Pass arguments that exactly match each tool's schema; if a required value is missing,
+  ask one concise clarifying question rather than guessing.
 - After a tool runs, explain the result briefly in plain language.
 - If a tool returns an error, tell the user clearly and suggest a fix.
 - Be concise, friendly, and accurate. If you truly can't help, say so honestly.`;
 
-export const grokAgent = new ToolLoopAgent({
-  model: xai(process.env.XAI_MODEL || "grok-3"),
-  instructions: SYSTEM_PROMPT,
-  tools,
-  stopWhen: stepCountIs(14),
-});
+/** Build a fresh ToolLoopAgent for the given (resolved) config. */
+export function buildAgent(config: AgentConfig = resolveAgentConfig()) {
+  return new ToolLoopAgent({
+    model: xai(config.model),
+    instructions: SYSTEM_PROMPT,
+    tools,
+    temperature: config.temperature,
+    stopWhen: stepCountIs(config.maxSteps),
+  });
+}
+
+/**
+ * Default singleton agent, built from environment config. Kept as a named
+ * export for backwards compatibility with existing imports.
+ */
+export const grokAgent = buildAgent();
+
+/**
+ * Run the agent to completion (non-streaming) and return the final text plus
+ * the full message history. This is the entry point used by the Temporal
+ * activity for durable execution — it is deterministic-friendly (no streaming,
+ * returns a plain serializable result).
+ */
+export async function runAgentToCompletion(
+  messages: ModelMessage[],
+  overrides: Partial<AgentConfig> = {}
+): Promise<{ text: string; config: AgentConfig }> {
+  const config = resolveAgentConfig(overrides);
+  const agent = buildAgent(config);
+  const result = await agent.generate({ messages });
+  return { text: result.text, config };
+}
+
+/** Convenience: accept UI messages (as posted by the chat client). */
+export async function runAgentFromUIMessages(
+  uiMessages: UIMessage[],
+  overrides: Partial<AgentConfig> = {}
+): Promise<{ text: string; config: AgentConfig }> {
+  const messages = await convertToModelMessages(uiMessages);
+  return runAgentToCompletion(messages, overrides);
+}

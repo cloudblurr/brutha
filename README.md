@@ -103,6 +103,83 @@ model messages, runs `grokAgent.stream(...)`, and returns
 `toUIMessageStreamResponse()` — which streams text *and* tool events to the
 client.
 
+## Durable execution (Temporal)
+
+BRUTHA can run the agent loop as a **durable Temporal workflow** so a run
+survives server/worker restarts and transient failures (e.g. a network blip
+calling Grok) are retried automatically — without losing the conversation.
+
+**Architecture**
+
+```
+src/lib/temporal/
+├── env.ts          # Reads TEMPORAL_* from env; redacted logging; local fallback
+├── client.ts       # Temporal Client factory (Cloud API key or local dev server)
+├── activities.ts   # runAgentActivity: runs the Grok agent loop (network/SQLite OK)
+├── workflows.ts    # agentWorkflow: deterministic orchestration + retry policy
+└── run.ts          # Starts/awaits the workflow from the Next.js API route
+src/worker.ts       # Worker process (polls the task queue, runs workflow+activity)
+scripts/temporal-check.ts  # Connectivity check (no worker required)
+```
+
+The workflow is replay-safe (it does no I/O); all side effects live in the
+activity, which Temporal records durably and retries per the workflow's policy
+(4 attempts, exponential backoff, 5-min activity timeout).
+
+**Enable it**
+
+1. Set the Temporal vars in `.env.local` (Cloud example):
+
+   ```
+   TEMPORAL_ADDRESS=brutha.m7tl8.tmprl.cloud:7233
+   TEMPORAL_NAMESPACE=brutha.m7tl8
+   TEMPORAL_API_KEY=<your Temporal Cloud API key>   # SECRET — never commit
+   ```
+
+   `.env*` (except `.env.example`) is gitignored, so the key is never committed.
+   TLS is enabled automatically when an API key is present.
+
+2. Start the worker (separate process from `next dev`):
+
+   ```bash
+   npm run worker        # or: npm run worker:dev (watch mode)
+   ```
+
+3. Verify connectivity any time:
+
+   ```bash
+   npm run temporal:check
+   ```
+
+When `TEMPORAL_API_KEY` or `TEMPORAL_ADDRESS` is set, the `/api/chat` route
+routes runs through Temporal (returns the final answer as JSON). If Temporal is
+unreachable it **falls back to the normal streaming path**, so the chat never
+hard-fails. Force the mode explicitly with `AGENT_DURABLE=1` (always durable)
+or `AGENT_DURABLE=0` (always streaming).
+
+**Local dev server** (no Cloud account needed):
+
+```bash
+temporal server start-dev --port 7233          # in one terminal
+AGENT_DURABLE=1 TEMPORAL_ADDRESS=localhost:7233 TEMPORAL_NAMESPACE=default npm run worker
+```
+
+## Agent tuning
+
+BRUTHA's behavior is tunable via environment variables (no model weight
+training — xAI does not expose Grok fine-tuning). `src/lib/agent.ts` exposes a
+typed `AgentConfig` resolved from env:
+
+| Env var             | Default  | Description                                  |
+| ------------------- | -------- | -------------------------------------------- |
+| `XAI_MODEL`         | `grok-3` | Grok model id.                               |
+| `AGENT_TEMPERATURE` | `0.2`    | Sampling temperature; lower = steadier tools.|
+| `AGENT_MAX_STEPS`   | `14`     | Max model↔tool steps before the loop stops.  |
+
+The system prompt also carries explicit **tool-routing guidance** (pick the
+most specific tool, prefer tools over stale memory for live data, reuse prior
+results, ask one clarifying question instead of guessing missing args).
+
 ## Adding your own tools
 
 Add an entry to the `tools` object in `src/lib/agent.ts`:
@@ -142,6 +219,7 @@ The model will automatically discover and call it when relevant.
 
 - [Next.js 16](https://nextjs.org)
 - [AI SDK v6](https://sdk.vercel.ai) + [`@ai-sdk/xai`](https://www.npmjs.com/package/@ai-sdk/xai)
+- [Temporal TypeScript SDK](https://docs.temporal.io/dev-guide/typescript) for durable execution
 - [Zod](https://zod.dev) for tool schemas
 - [Tailwind CSS](https://tailwindcss.com)
 

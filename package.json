@@ -6,11 +6,18 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "worker": "tsx --tsconfig tsconfig.worker.json -r tsconfig-paths/register src/worker.ts",
+    "worker:dev": "tsx watch --tsconfig tsconfig.worker.json -r tsconfig-paths/register src/worker.ts",
+    "temporal:check": "tsx --tsconfig tsconfig.worker.json -r tsconfig-paths/register scripts/temporal-check.ts"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.207",
     "@ai-sdk/xai": "^3.0.95",
+    "@temporalio/activity": "^1.18.1",
+    "@temporalio/client": "^1.18.1",
+    "@temporalio/worker": "^1.18.1",
+    "@temporalio/workflow": "^1.18.1",
     "ai": "^6.0.205",
     "better-sqlite3": "^12.10.1",
     "highlight.js": "^11.11.1",
@@ -33,6 +40,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
+    "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.22.4",
     "typescript": "^5"
   }
 }
