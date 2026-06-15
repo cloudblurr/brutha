@@ -170,6 +170,16 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "worker-progress",
+    up: (d) => {
+      // Live progress line for a running worker (e.g. "Step 2 · calling
+      // getWeather"). Updated by the agent's onStepFinish hook and polled by
+      // the Workers panel so users see motion instead of a frozen "running".
+      d.exec(`ALTER TABLE workers ADD COLUMN progress TEXT;`);
+    },
+  },
 ];
 
 /**

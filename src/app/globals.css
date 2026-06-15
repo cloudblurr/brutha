@@ -461,6 +461,17 @@ body {
 .worker-dot.error { background: #ef4444; }
 @keyframes pulse-dot { 50% { opacity: 0.4; } }
 
+/* Small pulsing dot shown beside a running worker's live progress line. */
+.worker-pulse {
+  display: inline-block;
+  height: 6px;
+  width: 6px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: #f59e0b;
+  animation: pulse-dot 1s infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

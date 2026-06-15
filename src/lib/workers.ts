@@ -29,6 +29,7 @@ export interface Worker {
   status: "queued" | "running" | "done" | "error";
   result: string | null;
   error: string | null;
+  progress: string | null;
   workflowId: string | null;
   durable: number;
   createdAt: string;
@@ -95,6 +96,7 @@ export async function runWorker(id: string): Promise<void> {
   const w = getWorker(id);
   if (!w || w.status !== "queued") return;
   setStatus(id, "running");
+  setProgress(id, "Starting…");
 
   // Bind the creator's data scope so the background agent's tools (contacts,
   // notes, tasks) read/write the right user's data — not the global scope.
@@ -130,18 +132,35 @@ async function runDurableWorker(w: Worker): Promise<void> {
   });
 }
 
+/** Set a live progress line on a running worker (best-effort). */
+function setProgress(id: string, progress: string) {
+  try {
+    getDb()
+      .prepare(
+        `UPDATE workers SET progress = ?, updatedAt = datetime('now') WHERE id = ?`
+      )
+      .run(progress, id);
+  } catch {
+    /* progress is non-critical */
+  }
+}
+
 /** In-process fallback path. */
 async function runInProcessWorker(w: Worker): Promise<void> {
   // Lazy import to avoid a circular dependency
   // (agent -> tool-registry -> tools/workers -> workers -> agent).
   const { runAgentFromUIMessages } = await import("./agent");
-  const { text } = await runAgentFromUIMessages([
-    {
-      id: randomUUID(),
-      role: "user",
-      parts: [{ type: "text", text: w.task }],
-    },
-  ]);
+  const { text } = await runAgentFromUIMessages(
+    [
+      {
+        id: randomUUID(),
+        role: "user",
+        parts: [{ type: "text", text: w.task }],
+      },
+    ],
+    {},
+    (label) => setProgress(w.id, label)
+  );
   setStatus(w.id, "done", { result: text });
 }
 

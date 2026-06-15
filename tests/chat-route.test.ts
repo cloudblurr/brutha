@@ -1,13 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { test, describe, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
 
 /**
- * Integration test for the chat endpoint (S3).
+ * Integration test for the chat endpoint.
  *
- * We exercise the route handler's input/config validation branches directly
+ * Exercises the route handler's input/config validation branches directly
  * (no live Grok call): missing env -> 500, bad body -> 400. The route reads env
  * lazily via getEnvError, so we manipulate process.env per test.
  */
-describe("/api/chat route (S3)", () => {
+describe("/api/chat route", () => {
   const original = process.env.XAI_API_KEY;
 
   beforeEach(() => {
@@ -18,7 +19,7 @@ describe("/api/chat route (S3)", () => {
     else process.env.XAI_API_KEY = original;
   });
 
-  it("returns 500 with a clear message when XAI_API_KEY is missing", async () => {
+  test("returns 500 with a clear message when XAI_API_KEY is missing", async () => {
     const { POST } = await import("@/app/api/chat/route");
     const req = new Request("http://localhost/api/chat", {
       method: "POST",
@@ -26,12 +27,12 @@ describe("/api/chat route (S3)", () => {
       headers: { "content-type": "application/json" },
     });
     const res = await POST(req);
-    expect(res.status).toBe(500);
+    assert.equal(res.status, 500);
     const json = (await res.json()) as { error: string };
-    expect(json.error).toMatch(/misconfigured/i);
+    assert.match(json.error, /misconfigured/i);
   });
 
-  it("returns 400 for an invalid body when env is valid", async () => {
+  test("returns 400 for an invalid body when env is valid", async () => {
     process.env.XAI_API_KEY = "test-key";
     const { POST } = await import("@/app/api/chat/route");
     const req = new Request("http://localhost/api/chat", {
@@ -40,6 +41,6 @@ describe("/api/chat route (S3)", () => {
       headers: { "content-type": "application/json" },
     });
     const res = await POST(req);
-    expect(res.status).toBe(400);
+    assert.equal(res.status, 400);
   });
 });

@@ -117,26 +117,57 @@ export function buildAgent(
 export const grokAgent = buildAgent();
 
 /**
+ * Optional per-step callback. Receives a short human-readable label describing
+ * what the agent just did on that step (e.g. "calling getWeather"). Used by
+ * background workers to surface live progress.
+ */
+export type StepProgress = (label: string, stepIndex: number) => void;
+
+/**
  * Run the agent to completion (non-streaming) and return the final text plus
  * the full message history. This is the entry point used by the Temporal
  * activity for durable execution — it is deterministic-friendly (no streaming,
  * returns a plain serializable result).
+ *
+ * `onProgress` (optional) is invoked after each step with a label naming the
+ * tool(s) called, so callers like background workers can report live status.
  */
 export async function runAgentToCompletion(
   messages: ModelMessage[],
-  overrides: Partial<AgentConfig> = {}
+  overrides: Partial<AgentConfig> = {},
+  onProgress?: StepProgress
 ): Promise<{ text: string; config: AgentConfig }> {
   const config = resolveAgentConfig(overrides);
   const agent = buildAgent(config);
-  const result = await agent.generate({ messages });
+  let stepIndex = 0;
+  const result = await agent.generate({
+    messages,
+    onStepFinish: onProgress
+      ? (step: { toolCalls?: { toolName: string }[] }) => {
+          stepIndex += 1;
+          const tools = (step.toolCalls ?? [])
+            .map((c) => c.toolName)
+            .filter(Boolean);
+          const label = tools.length
+            ? `Step ${stepIndex} · ${tools.join(", ")}`
+            : `Step ${stepIndex} · thinking`;
+          try {
+            onProgress(label, stepIndex);
+          } catch {
+            /* progress reporting must never break the run */
+          }
+        }
+      : undefined,
+  });
   return { text: result.text, config };
 }
 
 /** Convenience: accept UI messages (as posted by the chat client). */
 export async function runAgentFromUIMessages(
   uiMessages: UIMessage[],
-  overrides: Partial<AgentConfig> = {}
+  overrides: Partial<AgentConfig> = {},
+  onProgress?: StepProgress
 ): Promise<{ text: string; config: AgentConfig }> {
   const messages = await convertToModelMessages(uiMessages);
-  return runAgentToCompletion(messages, overrides);
+  return runAgentToCompletion(messages, overrides, onProgress);
 }

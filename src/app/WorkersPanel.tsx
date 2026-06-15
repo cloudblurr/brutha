@@ -15,6 +15,7 @@ interface Worker {
   status: "queued" | "running" | "done" | "error";
   result: string | null;
   error: string | null;
+  progress: string | null;
   createdAt: string;
 }
 
@@ -35,14 +36,19 @@ export function WorkersPanel({ open, onClose }: { open: boolean; onClose: () => 
 
   useEffect(() => {
     if (!open) return;
-    // Intentional: load workers when the panel opens, then poll.
+    // Intentional: load workers when the panel opens, then poll. Poll faster
+    // while a worker is actively running so the live progress line feels
+    // responsive, and back off when everything is settled.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    timer.current = setInterval(load, 2500);
+    const anyRunning = workers.some(
+      (w) => w.status === "running" || w.status === "queued"
+    );
+    timer.current = setInterval(load, anyRunning ? 1500 : 4000);
     return () => {
       if (timer.current) clearInterval(timer.current);
     };
-  }, [open, load]);
+  }, [open, load, workers]);
 
   if (!open) return null;
 
@@ -104,6 +110,13 @@ export function WorkersPanel({ open, onClose }: { open: boolean; onClose: () => 
                     {w.status}
                   </span>
                 </button>
+                {/* Live progress line while running. */}
+                {w.status === "running" && w.progress && (
+                  <p className="mt-1.5 flex items-center gap-1.5 truncate text-[11px] text-[var(--fg-muted)]">
+                    <span className="worker-pulse" aria-hidden />
+                    {w.progress}
+                  </p>
+                )}
                 {expanded === w.id && (
                   <div className="mt-2 space-y-2 border-t pt-2 text-xs">
                     <p className="text-[var(--fg-muted)]">{w.task}</p>

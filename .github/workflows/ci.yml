@@ -1,20 +1,48 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  verify:
+    name: typecheck · lint · test · build
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        # Legacy peer deps: next-auth's optional nodemailer peer conflicts with
+        # the app's nodemailer v8 (we don't use next-auth's email provider).
+        run: npm ci --legacy-peer-deps
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint src
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npx next build
         env:
-          # Build does not call the model, but some modules read env at import.
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY || 'ci-placeholder-key' }}
+          # Minimal env so the production build + route collection succeed.
+          XAI_API_KEY: ci-placeholder-key
+          AUTH_SECRET: ci-placeholder-secret-please-override-in-prod
