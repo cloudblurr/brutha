@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { createWorker, listWorkers, getWorker } from "../workers";
+import { currentScope } from "../scope";
 
 /**
  * BRUTHA Workers tools. Let the agent spawn and inspect background agent jobs
@@ -19,7 +20,9 @@ export const workerTools = {
     }),
     execute: async ({ title, task }) => {
       try {
-        const w = createWorker(title, task);
+        // Own the worker by the current request's user scope so it reads/writes
+        // the right user's data and is only listed for that user.
+        const w = createWorker(title, task, currentScope());
         return { spawned: true, id: w.id, title: w.title, status: w.status };
       } catch (e) {
         return { error: `Failed to spawn worker: ${e instanceof Error ? e.message : String(e)}` };
@@ -31,7 +34,7 @@ export const workerTools = {
     description: "List the user's BRUTHA Workers (background tasks) and their statuses.",
     inputSchema: z.object({}),
     execute: async () => {
-      const workers = listWorkers().map((w) => ({
+      const workers = listWorkers(currentScope()).map((w) => ({
         id: w.id,
         title: w.title,
         status: w.status,
@@ -46,7 +49,7 @@ export const workerTools = {
     inputSchema: z.object({ id: z.string() }),
     execute: async ({ id }) => {
       const w = getWorker(id);
-      if (!w) return { error: `No worker with id ${id}` };
+      if (!w || w.scope !== currentScope()) return { error: `No worker with id ${id}` };
       return { id: w.id, title: w.title, status: w.status, result: w.result, error: w.error };
     },
   }),

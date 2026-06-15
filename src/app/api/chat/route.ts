@@ -8,6 +8,8 @@ import type { FeatureFlags } from "@/lib/tool-registry";
 import { runDurableAgent, isTemporalEnabled } from "@/lib/temporal/run";
 import { getEnvError } from "@/lib/env";
 import { logger, newRequestId } from "@/lib/logger";
+import { resolveRequestScope } from "@/lib/request-scope";
+import { runWithScope } from "@/lib/scope";
 
 // Stream responses; this route runs on the Node.js runtime (required for
 // better-sqlite3 and nodemailer).
@@ -49,8 +51,9 @@ export async function POST(req: Request) {
   }
 
   const modelMessages: ModelMessage[] = await convertToModelMessages(messages);
+  const scope = await resolveRequestScope();
   logger.info(
-    { requestId, messages: modelMessages.length, durable: isTemporalEnabled() },
+    { requestId, messages: modelMessages.length, durable: isTemporalEnabled(), scope },
     "chat request"
   );
 
@@ -89,20 +92,27 @@ export async function POST(req: Request) {
   }
 
   // --- Streaming path (default) ------------------------------------------
-  const agent = buildAgent(undefined, features);
-  const result = await agent.stream({ messages: modelMessages });
-  return result.toUIMessageStreamResponse({
-    // S1.3: never leak raw stack traces to the client; send a friendly
-    // fallback message if the stream errors mid-flight.
-    onError: (error) => {
-      logger.error(
-        {
-          requestId,
-          err: error instanceof Error ? error.stack ?? error.message : error,
+  // Bind the user's data scope for the whole streamed run so tool calls
+  // (contacts/notes/tasks/workers) operate on the right user's data. The
+  // AsyncLocalStorage context established here propagates through the agent's
+  // async tool loop.
+  return runWithScope(scope, () => {
+    const agent = buildAgent(undefined, features);
+    return agent.stream({ messages: modelMessages }).then((result) =>
+      result.toUIMessageStreamResponse({
+        // S1.3: never leak raw stack traces to the client; send a friendly
+        // fallback message if the stream errors mid-flight.
+        onError: (error) => {
+          logger.error(
+            {
+              requestId,
+              err: error instanceof Error ? error.stack ?? error.message : error,
+            },
+            "streaming error"
+          );
+          return "Sorry, I ran into a problem. Please try again.";
         },
-        "streaming error"
-      );
-      return "Sorry, I ran into a problem. Please try again.";
-    },
+      })
+    );
   });
 }

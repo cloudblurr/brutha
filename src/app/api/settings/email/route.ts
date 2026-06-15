@@ -1,5 +1,6 @@
 import { getSetting, setSetting } from "@/lib/db";
 import { isEmailConfigured } from "@/lib/email";
+import { resolveRequestScope } from "@/lib/request-scope";
 
 export const runtime = "nodejs";
 
@@ -10,11 +11,10 @@ export const runtime = "nodejs";
  *         transport is configured.
  * POST -> set the "from" identity ({ from: "Name <addr@example.com>" }).
  *
- * Scope is "global" today (single operator). Once auth exists, derive the
- * scope from the session user id so each user gets their own sender identity.
+ * Scoped per signed-in user (falls back to the "global" operator scope when
+ * unauthenticated), so each user gets their own sender identity.
  */
 
-const SCOPE = "global";
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /** Pull a bare email address out of a "Name <addr>" or plain "addr" string. */
@@ -25,7 +25,8 @@ function extractAddress(from: string): string | null {
 }
 
 export async function GET() {
-  const stored = getSetting("email.from", SCOPE);
+  const scope = await resolveRequestScope();
+  const stored = getSetting("email.from", scope);
   const effective = stored || process.env.SMTP_FROM || process.env.SMTP_USER || null;
   return Response.json({
     from: effective,
@@ -35,6 +36,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const scope = await resolveRequestScope();
   let from: unknown;
   try {
     ({ from } = await req.json());
@@ -53,6 +55,6 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  setSetting("email.from", from.trim(), SCOPE);
+  setSetting("email.from", from.trim(), scope);
   return Response.json({ saved: true, from: from.trim() });
 }

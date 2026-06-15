@@ -33,6 +33,15 @@ const envSchema = z.object({
   TEMPORAL_API_KEY: z.string().optional(),
   TEMPORAL_TASK_QUEUE: z.string().optional(),
   AGENT_DURABLE: z.enum(["0", "1"]).optional(),
+
+  // Optional authentication (Auth.js). All optional so the app runs with zero
+  // config (dev credentials fallback). Set AUTH_SECRET in production.
+  AUTH_SECRET: z.string().optional(),
+  AUTH_GITHUB_ID: z.string().optional(),
+  AUTH_GITHUB_SECRET: z.string().optional(),
+  AUTH_GOOGLE_ID: z.string().optional(),
+  AUTH_GOOGLE_SECRET: z.string().optional(),
+  AUTH_ALLOW_DEV_LOGIN: z.enum(["0", "1"]).optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

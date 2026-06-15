@@ -123,6 +123,53 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "per-user-scoping",
+    up: (d) => {
+      // Add a `scope` column to every per-user table so rows can be filtered by
+      // owner. Existing rows belong to the pre-auth single-operator 'global'
+      // scope, preserving backward compatibility. Once a user signs in, their
+      // user id becomes the scope.
+      //
+      // SQLite's ALTER TABLE ADD COLUMN can't add a NOT NULL column without a
+      // constant default, but a DEFAULT 'global' is constant, so this is safe
+      // and backfills existing rows to 'global' automatically.
+      d.exec(`
+        ALTER TABLE contacts ADD COLUMN scope TEXT NOT NULL DEFAULT 'global';
+        ALTER TABLE notes    ADD COLUMN scope TEXT NOT NULL DEFAULT 'global';
+        ALTER TABLE tasks    ADD COLUMN scope TEXT NOT NULL DEFAULT 'global';
+
+        CREATE INDEX IF NOT EXISTS contacts_scope ON contacts (scope);
+        CREATE INDEX IF NOT EXISTS notes_scope    ON notes (scope);
+        CREATE INDEX IF NOT EXISTS tasks_scope     ON tasks (scope);
+      `);
+
+      // Durable-workers bookkeeping: a worker may be backed by a Temporal
+      // workflow. Track its id and the durability mode so the app can resume /
+      // reconcile after a restart.
+      d.exec(`
+        ALTER TABLE workers ADD COLUMN workflowId TEXT;
+        ALTER TABLE workers ADD COLUMN durable    INTEGER NOT NULL DEFAULT 0;
+      `);
+
+      // Users table for Auth.js (credentials provider hashes live here; OAuth
+      // users are upserted on sign-in). Auth.js itself uses JWT sessions in
+      // this setup, so we only persist the canonical user record + optional
+      // password hash for the dev credentials provider.
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+          id           TEXT PRIMARY KEY,
+          email        TEXT UNIQUE NOT NULL,
+          name         TEXT,
+          image        TEXT,
+          passwordHash TEXT,
+          provider     TEXT NOT NULL DEFAULT 'credentials',
+          createdAt    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    },
+  },
 ];
 
 /**

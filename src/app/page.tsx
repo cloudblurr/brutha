@@ -29,7 +29,7 @@ import { WorkersPanel } from "./WorkersPanel";
 import {
   SettingsModal,
   AccountButton,
-  useMockAuth,
+  useAuth,
 } from "./Settings";
 
 const SUGGESTIONS = [
@@ -113,7 +113,7 @@ export default function Home() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [workersOpen, setWorkersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const auth = useMockAuth();
+  const auth = useAuth();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -462,7 +462,6 @@ export default function Home() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         user={auth.user}
-        signIn={auth.signIn}
         signOut={auth.signOut}
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}

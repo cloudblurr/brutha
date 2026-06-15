@@ -1,10 +1,21 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { getDb } from "../db";
+import { currentScope } from "../scope";
 
 function errMsg(e: unknown) {
   return e instanceof Error ? e.message : String(e);
 }
+
+/**
+ * Storage tools (contacts, notes, tasks) are PER-USER scoped.
+ *
+ * Every row carries a `scope` column equal to its owner's user id (or "global"
+ * for the unauthenticated single-operator fallback). The scope for the current
+ * request is read from AsyncLocalStorage via `currentScope()` — set at the
+ * request boundary by the chat/workers routes. All reads, updates and deletes
+ * filter by scope so users can only ever see and mutate their own data.
+ */
 
 export const storageTools = {
   // ---------- Contacts ----------
@@ -21,9 +32,9 @@ export const storageTools = {
       try {
         const info = getDb()
           .prepare(
-            "INSERT INTO contacts (name, email, phone, notes) VALUES (?, ?, ?, ?)"
+            "INSERT INTO contacts (name, email, phone, notes, scope) VALUES (?, ?, ?, ?, ?)"
           )
-          .run(name, email ?? null, phone ?? null, notes ?? null);
+          .run(name, email ?? null, phone ?? null, notes ?? null, currentScope());
         return { saved: true, id: Number(info.lastInsertRowid), name };
       } catch (e) {
         return { error: `Failed to save contact: ${errMsg(e)}` };
@@ -41,10 +52,10 @@ export const storageTools = {
         const rows = getDb()
           .prepare(
             `SELECT id, name, email, phone, notes FROM contacts
-             WHERE name LIKE ? OR email LIKE ? OR phone LIKE ?
+             WHERE scope = ? AND (name LIKE ? OR email LIKE ? OR phone LIKE ?)
              ORDER BY name LIMIT 10`
           )
-          .all(like, like, like);
+          .all(currentScope(), like, like, like);
         return { count: rows.length, contacts: rows };
       } catch (e) {
         return { error: `Failed to search contacts: ${errMsg(e)}` };
@@ -59,9 +70,9 @@ export const storageTools = {
       try {
         const rows = getDb()
           .prepare(
-            "SELECT id, name, email, phone FROM contacts ORDER BY name LIMIT 100"
+            "SELECT id, name, email, phone FROM contacts WHERE scope = ? ORDER BY name LIMIT 100"
           )
-          .all();
+          .all(currentScope());
         return { count: rows.length, contacts: rows };
       } catch (e) {
         return { error: `Failed to list contacts: ${errMsg(e)}` };
@@ -100,9 +111,9 @@ export const storageTools = {
           vals.push(notes);
         }
         if (sets.length === 0) return { error: "No fields to update." };
-        vals.push(id);
+        vals.push(id, currentScope());
         const info = getDb()
-          .prepare(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ?`)
+          .prepare(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ? AND scope = ?`)
           .run(...vals);
         return info.changes
           ? { updated: true, id }
@@ -118,7 +129,9 @@ export const storageTools = {
     inputSchema: z.object({ id: z.number().int() }),
     execute: async ({ id }) => {
       try {
-        const info = getDb().prepare("DELETE FROM contacts WHERE id = ?").run(id);
+        const info = getDb()
+          .prepare("DELETE FROM contacts WHERE id = ? AND scope = ?")
+          .run(id, currentScope());
         return info.changes
           ? { deleted: true, id }
           : { error: `No contact with id ${id}.` };
@@ -139,8 +152,8 @@ export const storageTools = {
     execute: async ({ content, title }) => {
       try {
         const info = getDb()
-          .prepare("INSERT INTO notes (title, content) VALUES (?, ?)")
-          .run(title ?? null, content);
+          .prepare("INSERT INTO notes (title, content, scope) VALUES (?, ?, ?)")
+          .run(title ?? null, content, currentScope());
         return { saved: true, id: Number(info.lastInsertRowid), title };
       } catch (e) {
         return { error: `Failed to save note: ${errMsg(e)}` };
@@ -163,9 +176,9 @@ export const storageTools = {
           .prepare(
             `SELECT n.id, n.title, n.content, n.createdAt
              FROM notes_fts f JOIN notes n ON n.id = f.rowid
-             WHERE notes_fts MATCH ? ORDER BY rank LIMIT 10`
+             WHERE notes_fts MATCH ? AND n.scope = ? ORDER BY rank LIMIT 10`
           )
-          .all(fts);
+          .all(fts, currentScope());
         return { count: rows.length, notes: rows };
       } catch (e) {
         return { error: `Failed to search notes: ${errMsg(e)}` };
@@ -180,9 +193,9 @@ export const storageTools = {
       try {
         const rows = getDb()
           .prepare(
-            "SELECT id, title, content, createdAt FROM notes ORDER BY id DESC LIMIT 50"
+            "SELECT id, title, content, createdAt FROM notes WHERE scope = ? ORDER BY id DESC LIMIT 50"
           )
-          .all();
+          .all(currentScope());
         return { count: rows.length, notes: rows };
       } catch (e) {
         return { error: `Failed to list notes: ${errMsg(e)}` };
@@ -195,7 +208,9 @@ export const storageTools = {
     inputSchema: z.object({ id: z.number().int() }),
     execute: async ({ id }) => {
       try {
-        const info = getDb().prepare("DELETE FROM notes WHERE id = ?").run(id);
+        const info = getDb()
+          .prepare("DELETE FROM notes WHERE id = ? AND scope = ?")
+          .run(id, currentScope());
         return info.changes
           ? { deleted: true, id }
           : { error: `No note with id ${id}.` };
@@ -216,8 +231,8 @@ export const storageTools = {
     execute: async ({ task, due }) => {
       try {
         const info = getDb()
-          .prepare("INSERT INTO tasks (task, due) VALUES (?, ?)")
-          .run(task, due ?? null);
+          .prepare("INSERT INTO tasks (task, due, scope) VALUES (?, ?, ?)")
+          .run(task, due ?? null, currentScope());
         return { added: true, id: Number(info.lastInsertRowid), task, due };
       } catch (e) {
         return { error: `Failed to add task: ${errMsg(e)}` };
@@ -232,12 +247,12 @@ export const storageTools = {
     }),
     execute: async ({ includeDone }) => {
       try {
-        const where = includeDone ? "" : "WHERE done = 0";
+        const doneClause = includeDone ? "" : "AND done = 0";
         const rows = getDb()
           .prepare(
-            `SELECT id, task, due, done FROM tasks ${where} ORDER BY done, id LIMIT 100`
+            `SELECT id, task, due, done FROM tasks WHERE scope = ? ${doneClause} ORDER BY done, id LIMIT 100`
           )
-          .all();
+          .all(currentScope());
         return { count: rows.length, tasks: rows };
       } catch (e) {
         return { error: `Failed to list tasks: ${errMsg(e)}` };
@@ -251,8 +266,8 @@ export const storageTools = {
     execute: async ({ id }) => {
       try {
         const info = getDb()
-          .prepare("UPDATE tasks SET done = 1 WHERE id = ?")
-          .run(id);
+          .prepare("UPDATE tasks SET done = 1 WHERE id = ? AND scope = ?")
+          .run(id, currentScope());
         return info.changes
           ? { completed: true, id }
           : { error: `No task with id ${id}.` };
@@ -267,7 +282,9 @@ export const storageTools = {
     inputSchema: z.object({ id: z.number().int() }),
     execute: async ({ id }) => {
       try {
-        const info = getDb().prepare("DELETE FROM tasks WHERE id = ?").run(id);
+        const info = getDb()
+          .prepare("DELETE FROM tasks WHERE id = ? AND scope = ?")
+          .run(id, currentScope());
         return info.changes
           ? { deleted: true, id }
           : { error: `No task with id ${id}.` };

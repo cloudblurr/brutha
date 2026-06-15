@@ -1,48 +1,40 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession, signIn as nextSignIn, signOut as nextSignOut } from "next-auth/react";
 import { Settings, User, X, LogIn, LogOut, Sun, Moon } from "./icons";
 
 /**
- * Settings menu + Profile modal with mock Sign-In/Out.
+ * Settings menu + Profile modal backed by real Auth.js sessions.
  *
- * Auth is intentionally a local stub (localStorage) so the full UX exists
- * today without a real backend auth provider. To switch to real auth later,
- * replace `useMockAuth` with NextAuth's useSession()/signIn()/signOut() — the
- * component API (user object, signIn/out callbacks) is the same shape.
+ * `useAuth()` wraps next-auth's useSession() and exposes the same shape the UI
+ * already consumed from the old mock (user / ready / signOut), plus credential
+ * + OAuth sign-in helpers. OAuth buttons only render for providers the server
+ * actually has configured (discovered via /api/auth/providers).
  */
 
-export interface MockUser {
+export interface AuthUser {
+  id: string;
   name: string;
   email: string;
+  image?: string | null;
 }
 
-const AUTH_KEY = "brutha-auth-user";
-
-export function useMockAuth() {
-  const [user, setUser] = useState<MockUser | null>(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(AUTH_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (raw) setUser(JSON.parse(raw));
-    } catch {
-      /* ignore */
-    }
-    setReady(true);
-  }, []);
-
-  function signIn(u: MockUser) {
-    setUser(u);
-    localStorage.setItem(AUTH_KEY, JSON.stringify(u));
-  }
-  function signOut() {
-    setUser(null);
-    localStorage.removeItem(AUTH_KEY);
-  }
-  return { user, ready, signIn, signOut };
+export function useAuth() {
+  const { data, status } = useSession();
+  const user: AuthUser | null = data?.user
+    ? {
+        id: data.user.id,
+        name: data.user.name ?? data.user.email ?? "User",
+        email: data.user.email ?? "",
+        image: data.user.image,
+      }
+    : null;
+  return {
+    user,
+    ready: status !== "loading",
+    signOut: () => nextSignOut({ redirect: false }),
+  };
 }
 
 function initials(name: string) {
@@ -60,7 +52,7 @@ export function AccountButton({
   user,
   onOpen,
 }: {
-  user: MockUser | null;
+  user: AuthUser | null;
   onOpen: () => void;
 }) {
   return (
@@ -85,30 +77,42 @@ export function SettingsModal({
   open,
   onClose,
   user,
-  signIn,
   signOut,
   theme,
   onToggleTheme,
 }: {
   open: boolean;
   onClose: () => void;
-  user: MockUser | null;
-  signIn: (u: MockUser) => void;
+  user: AuthUser | null;
   signOut: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
 }) {
-  const [signInName, setSignInName] = useState("");
   const [signInEmail, setSignInEmail] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
+  const [oauthProviders, setOauthProviders] = useState<
+    { id: string; name: string }[]
+  >([]);
   const [emailFrom, setEmailFrom] = useState("");
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
 
-  // Load the email identity when the modal opens.
+  // Load the email identity + which OAuth providers are configured.
   useEffect(() => {
     if (!open) return;
     fetch("/api/settings/email")
       .then((r) => r.json())
       .then((d) => setEmailFrom(d.from ?? ""))
+      .catch(() => {});
+    fetch("/api/auth/providers")
+      .then((r) => r.json())
+      .then((d: Record<string, { id: string; name: string }>) => {
+        const list = Object.values(d ?? {}).filter(
+          (p) => p.id === "github" || p.id === "google"
+        );
+        setOauthProviders(list);
+      })
       .catch(() => {});
   }, [open]);
 
@@ -125,12 +129,22 @@ export function SettingsModal({
     setEmailStatus(res.ok ? "Saved." : d.error ?? "Failed.");
   }
 
-  function doSignIn(e: React.FormEvent) {
+  async function doSignIn(e: React.FormEvent) {
     e.preventDefault();
-    if (!signInName.trim() || !signInEmail.trim()) return;
-    signIn({ name: signInName.trim(), email: signInEmail.trim() });
-    setSignInName("");
-    setSignInEmail("");
+    if (!signInEmail.trim() || !signInPassword) return;
+    setSigningIn(true);
+    setSignInError(null);
+    const res = await nextSignIn("credentials", {
+      email: signInEmail.trim(),
+      password: signInPassword,
+      redirect: false,
+    });
+    setSigningIn(false);
+    if (res?.error) {
+      setSignInError("Invalid email or password.");
+    } else {
+      setSignInPassword("");
+    }
   }
 
   return (
@@ -179,27 +193,55 @@ export function SettingsModal({
               </button>
             </div>
           ) : (
-            <form onSubmit={doSignIn} className="mt-3 space-y-2">
-              <input
-                value={signInName}
-                onChange={(e) => setSignInName(e.target.value)}
-                placeholder="Your name"
-                className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
-              />
-              <input
-                value={signInEmail}
-                onChange={(e) => setSignInEmail(e.target.value)}
-                placeholder="you@example.com"
-                type="email"
-                className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
-              />
-              <button
-                type="submit"
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-[var(--hover)]"
-              >
-                <LogIn className="h-[16px] w-[16px]" /> Sign in
-              </button>
-            </form>
+            <div className="mt-3 space-y-2">
+              {oauthProviders.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => nextSignIn(p.id)}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-[var(--hover)]"
+                >
+                  <LogIn className="h-[16px] w-[16px]" /> Continue with {p.name}
+                </button>
+              ))}
+
+              {oauthProviders.length > 0 && (
+                <div className="flex items-center gap-2 py-1 text-[11px] text-[var(--fg-subtle)]">
+                  <span className="h-px flex-1 bg-[var(--border)]" /> or email{" "}
+                  <span className="h-px flex-1 bg-[var(--border)]" />
+                </div>
+              )}
+
+              <form onSubmit={doSignIn} className="space-y-2">
+                <input
+                  value={signInEmail}
+                  onChange={(e) => setSignInEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  type="email"
+                  autoComplete="email"
+                  className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
+                />
+                <input
+                  value={signInPassword}
+                  onChange={(e) => setSignInPassword(e.target.value)}
+                  placeholder="Password"
+                  type="password"
+                  autoComplete="current-password"
+                  className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
+                />
+                {signInError && (
+                  <p className="text-xs text-red-500 dark:text-red-300">{signInError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={signingIn}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-[var(--hover)] disabled:opacity-50"
+                >
+                  <LogIn className="h-[16px] w-[16px]" />
+                  {signingIn ? "Signing in…" : "Sign in / Sign up"}
+                </button>
+              </form>
+            </div>
           )}
         </section>
 
