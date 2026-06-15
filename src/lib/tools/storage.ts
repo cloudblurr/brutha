@@ -83,10 +83,22 @@ export const storageTools = {
       try {
         const sets: string[] = [];
         const vals: unknown[] = [];
-        if (name !== undefined) (sets.push("name = ?"), vals.push(name));
-        if (email !== undefined) (sets.push("email = ?"), vals.push(email));
-        if (phone !== undefined) (sets.push("phone = ?"), vals.push(phone));
-        if (notes !== undefined) (sets.push("notes = ?"), vals.push(notes));
+        if (name !== undefined) {
+          sets.push("name = ?");
+          vals.push(name);
+        }
+        if (email !== undefined) {
+          sets.push("email = ?");
+          vals.push(email);
+        }
+        if (phone !== undefined) {
+          sets.push("phone = ?");
+          vals.push(phone);
+        }
+        if (notes !== undefined) {
+          sets.push("notes = ?");
+          vals.push(notes);
+        }
         if (sets.length === 0) return { error: "No fields to update." };
         vals.push(id);
         const info = getDb()
