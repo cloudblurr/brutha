@@ -3,11 +3,24 @@ import { z } from "zod";
 import { cached } from "./_cache";
 
 function errMsg(e: unknown) {
-  return e instanceof Error ? e.message : String(e);
+  if (e instanceof Error) {
+    // Surface AbortSignal.timeout() rejections as a clear, human-readable cause
+    // instead of the opaque "The operation was aborted" / TimeoutError name.
+    if (e.name === "TimeoutError" || e.name === "AbortError") return "request timed out";
+    return e.message;
+  }
+  return String(e);
 }
 
+// Default per-request timeout for outbound API calls so a hung upstream can't
+// stall the agent's tool loop. fetchUrl uses its own (longer) timeout below.
+const DEFAULT_FETCH_TIMEOUT_MS = 10000;
+
 async function getJson(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
+  const res = await fetch(url, {
+    ...init,
+    signal: init?.signal ?? AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return res.json();
 }

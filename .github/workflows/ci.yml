@@ -27,15 +27,13 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        # Legacy peer deps: next-auth's optional nodemailer peer conflicts with
-        # the app's nodemailer v8 (we don't use next-auth's email provider).
-        run: npm ci --legacy-peer-deps
+        run: npm ci
 
       - name: Type check
         run: npx tsc --noEmit
 
       - name: Lint
-        run: npx eslint src
+        run: npm run lint
 
       - name: Unit tests
         run: npm test
