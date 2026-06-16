@@ -36,10 +36,12 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
+drop policy if exists "profiles: read own" on public.profiles;
 create policy "profiles: read own"
   on public.profiles for select
   using (id = auth.uid());
 
+drop policy if exists "profiles: update own" on public.profiles;
 create policy "profiles: update own"
   on public.profiles for update
   using (id = auth.uid())
@@ -84,6 +86,7 @@ create table if not exists public.contacts (
 create index if not exists contacts_owner_idx on public.contacts (owner);
 
 alter table public.contacts enable row level security;
+drop policy if exists "contacts: all own" on public.contacts;
 create policy "contacts: all own" on public.contacts
   for all using (owner = auth.uid()) with check (owner = auth.uid());
 
@@ -104,6 +107,7 @@ create index if not exists notes_owner_idx  on public.notes (owner);
 create index if not exists notes_search_idx on public.notes using gin (search);
 
 alter table public.notes enable row level security;
+drop policy if exists "notes: all own" on public.notes;
 create policy "notes: all own" on public.notes
   for all using (owner = auth.uid()) with check (owner = auth.uid());
 
@@ -121,6 +125,7 @@ create table if not exists public.tasks (
 create index if not exists tasks_owner_idx on public.tasks (owner);
 
 alter table public.tasks enable row level security;
+drop policy if exists "tasks: all own" on public.tasks;
 create policy "tasks: all own" on public.tasks
   for all using (owner = auth.uid()) with check (owner = auth.uid());
 
@@ -136,6 +141,7 @@ create table if not exists public.settings (
 );
 
 alter table public.settings enable row level security;
+drop policy if exists "settings: all own" on public.settings;
 create policy "settings: all own" on public.settings
   for all using (owner = auth.uid()) with check (owner = auth.uid());
 
@@ -164,10 +170,13 @@ alter table public.workers enable row level security;
 -- Owners can see / create / delete their own workers. Status/result updates are
 -- written by the Edge Function using the service-role key (which bypasses RLS),
 -- so no broad UPDATE policy is granted to end users.
+drop policy if exists "workers: read own" on public.workers;
 create policy "workers: read own" on public.workers
   for select using (owner = auth.uid());
+drop policy if exists "workers: insert own" on public.workers;
 create policy "workers: insert own" on public.workers
   for insert with check (owner = auth.uid());
+drop policy if exists "workers: delete own" on public.workers;
 create policy "workers: delete own" on public.workers
   for delete using (owner = auth.uid());
 
@@ -214,6 +223,7 @@ on conflict (id) do nothing;
 
 -- RLS on storage.objects: a user may read/write/delete only objects whose first
 -- path segment equals their user id.
+drop policy if exists "uploads: read own" on storage.objects;
 create policy "uploads: read own"
   on storage.objects for select
   using (
@@ -221,6 +231,7 @@ create policy "uploads: read own"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "uploads: insert own" on storage.objects;
 create policy "uploads: insert own"
   on storage.objects for insert
   with check (
@@ -228,6 +239,7 @@ create policy "uploads: insert own"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "uploads: delete own" on storage.objects;
 create policy "uploads: delete own"
   on storage.objects for delete
   using (

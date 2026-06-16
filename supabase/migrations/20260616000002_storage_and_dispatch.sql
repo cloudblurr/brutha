@@ -24,6 +24,7 @@ on conflict (id) do nothing;
 
 -- RLS on storage.objects: a user may read/write/delete only objects whose first
 -- path segment equals their user id.
+drop policy if exists "uploads: read own" on storage.objects;
 create policy "uploads: read own"
   on storage.objects for select
   using (
@@ -31,6 +32,7 @@ create policy "uploads: read own"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "uploads: insert own" on storage.objects;
 create policy "uploads: insert own"
   on storage.objects for insert
   with check (
@@ -38,6 +40,7 @@ create policy "uploads: insert own"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+drop policy if exists "uploads: delete own" on storage.objects;
 create policy "uploads: delete own"
   on storage.objects for delete
   using (
