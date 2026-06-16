@@ -11,6 +11,7 @@ import { workerTools } from "./tools/workers";
 import { financeTools } from "./tools/finance";
 import { documentTools } from "./tools/documents";
 import { schedulingTools } from "./tools/scheduling";
+import { memoryTools } from "./tools/memory";
 
 /**
  * Tool registry & plugin hook (S11).
@@ -39,6 +40,7 @@ export const toolCategories: Record<string, ToolMap> = {
   finance: financeTools,
   documents: documentTools,
   scheduling: schedulingTools,
+  memory: memoryTools,
 };
 
 /**
@@ -68,6 +70,7 @@ const ALWAYS_ON = [
   "finance",
   "documents",
   "scheduling",
+  "memory",
 ];
 
 // Plugin-registered tools (populated via registerTool at startup).

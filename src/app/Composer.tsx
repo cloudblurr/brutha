@@ -9,8 +9,10 @@ import {
   Globe,
   ImageIcon,
   Bot,
+  Mic,
   X,
 } from "./icons";
+import { useDictation } from "./useDictation";
 
 /**
  * Composer: the input bar with file upload, prompt enhance, and feature
@@ -66,6 +68,16 @@ export function Composer({
   const [enhancing, setEnhancing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Voice dictation: append finalized speech to the input as the user speaks.
+  const dictation = useDictation({
+    onResult: (finalText) => {
+      const t = finalText.trim();
+      if (!t) return;
+      setInput((input ? input + " " : "") + t);
+      requestAnimationFrame(autoGrow);
+    },
+  });
 
   function autoGrow() {
     const el = textareaRef.current;
@@ -242,6 +254,20 @@ export function Composer({
             {enhancing ? "Enhancing…" : "Enhance"}
           </button>
 
+          {dictation.supported && (
+            <button
+              type="button"
+              onClick={dictation.toggle}
+              className={"toggle-pill " + (dictation.listening ? "on" : "")}
+              aria-pressed={dictation.listening}
+              aria-label={dictation.listening ? "Stop dictation" : "Dictate by voice"}
+              title="Dictate by voice"
+            >
+              <Mic className={"h-[14px] w-[14px] " + (dictation.listening ? "tool-glyph-spin" : "")} />
+              {dictation.listening ? "Listening…" : "Voice"}
+            </button>
+          )}
+
           <span className="mx-0.5 h-4 w-px bg-[var(--border)]" />
 
           <button
@@ -280,8 +306,8 @@ export function Composer({
         </div>
       </form>
 
-      {error && (
-        <p className="mt-1.5 text-center text-xs text-red-500 dark:text-red-300">{error}</p>
+      {(error || dictation.error) && (
+        <p className="mt-1.5 text-center text-xs text-red-500 dark:text-red-300">{error || dictation.error}</p>
       )}
     </div>
   );

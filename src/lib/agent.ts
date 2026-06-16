@@ -87,6 +87,7 @@ Prefer using a tool over guessing. Highlights of what you can do:
 - Knowledge & web: wikipedia, dictionary, fetchUrl, countryInfo, cryptoPrice, ipInfo, topNews, translate, compareTopics (side-by-side research synthesis).
 - Geo: distanceBetween, sunriseSunset.
 - Memory: contacts (save/find/list/update/delete), notes (save/search/list/delete), tasks (add/list/complete/delete).
+- Durable memory (persists across sessions): rememberFact (store a stable, useful fact/preference — never trivia), recallMemory (search what you remembered before answering), listMemories, forgetMemory. Recall BEFORE asking the user to repeat something they've told you; remember new stable facts proactively.
 - Text & data: slugify, changeCase, regexExtract, formatJson, csvToJson, parseUrl, sortList.
 - Documents & comms: draftEmail (compose, do not send), generateDocument (formatted Markdown), sendEmail (sends; gated by confirmation).
 - Generators: generatePassword, generateUuid, hashText, encodeBase64, qrCode, randomNumber, rollDice.
@@ -126,14 +127,44 @@ export function buildSystemPrompt(personaId: string = resolvePersonaId()): strin
   return `${SYSTEM_PROMPT}\n\n## Active persona overlay\n${overlay}`;
 }
 
+/**
+ * Render a compact "what you remember about this user" block from durable
+ * memory, to prepend to the system prompt at request time. Returns "" when
+ * there are no memories (or the lookup fails — memory must never break a run).
+ * Kept short and scannable so it costs few tokens.
+ */
+export function buildMemoryContext(memories: { kind: string; content: string }[]): string {
+  if (!memories.length) return "";
+  const lines = memories
+    .map((m) => `- (${m.kind}) ${m.content}`)
+    .join("\n");
+  return `## What you remember about this user\nThese are durable facts you previously saved. Treat them as established context; if one is contradicted, update it with rememberFact/forgetMemory.\n${lines}`;
+}
+
+/**
+ * Build the full instructions for a request: base prompt + persona overlay +
+ * an optional durable-memory context block. Use this in request handlers that
+ * have a bound user scope so the agent starts each turn already knowing the
+ * user's remembered context.
+ */
+export function buildInstructions(opts?: {
+  personaId?: string;
+  memories?: { kind: string; content: string }[];
+}): string {
+  const base = buildSystemPrompt(opts?.personaId);
+  const mem = opts?.memories ? buildMemoryContext(opts.memories) : "";
+  return mem ? `${base}\n\n${mem}` : base;
+}
+
 /** Build a fresh ToolLoopAgent for the given (resolved) config + features. */
 export function buildAgent(
   config: AgentConfig = resolveAgentConfig(),
-  features?: Partial<FeatureFlags>
+  features?: Partial<FeatureFlags>,
+  instructions?: string
 ) {
   return new ToolLoopAgent({
     model: resolveModel(config.model),
-    instructions: buildSystemPrompt(),
+    instructions: instructions ?? buildSystemPrompt(),
     tools: features ? getToolsForFeatures(features) : tools,
     temperature: config.temperature,
     stopWhen: stepCountIs(config.maxSteps),

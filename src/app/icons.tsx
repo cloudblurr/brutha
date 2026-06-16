@@ -35,6 +35,17 @@ export function Plus({ className }: P) {
   );
 }
 
+export function Mic({ className }: P) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" {...base} className={className} aria-hidden>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <path d="M12 17v4" />
+      <path d="M8 21h8" />
+    </svg>
+  );
+}
+
 export function Trash({ className }: P) {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" {...base} className={className} aria-hidden>

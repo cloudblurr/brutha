@@ -3,7 +3,7 @@ import {
   type UIMessage,
   type ModelMessage,
 } from "ai";
-import { buildAgent } from "@/lib/agent";
+import { buildAgent, buildInstructions } from "@/lib/agent";
 import type { FeatureFlags } from "@/lib/tool-registry";
 import { runDurableAgent, isTemporalEnabled } from "@/lib/temporal/run";
 import { getEnvError } from "@/lib/env";
@@ -11,6 +11,7 @@ import { logger, newRequestId } from "@/lib/logger";
 import { resolveRequestScope } from "@/lib/request-scope";
 import { runWithScope } from "@/lib/scope";
 import { increment, Metric } from "@/lib/metrics";
+import { topMemories } from "@/lib/memory/store";
 
 // Stream responses; this route runs on the Node.js runtime (required for
 // better-sqlite3 and nodemailer).
@@ -104,7 +105,21 @@ export async function POST(req: Request) {
   // AsyncLocalStorage context established here propagates through the agent's
   // async tool loop.
   return runWithScope(scope, () => {
-    const agent = buildAgent(undefined, features);
+    // Seed the agent with the user's durable memory so it starts each turn
+    // already knowing established context. Best-effort: memory must never break
+    // a chat run, so any failure falls back to the base instructions.
+    let instructions: string | undefined;
+    try {
+      const memories = topMemories(8);
+      instructions = buildInstructions({ memories });
+    } catch (err) {
+      logger.warn(
+        { requestId, err: err instanceof Error ? err.message : String(err) },
+        "memory context load failed; using base instructions"
+      );
+      instructions = undefined;
+    }
+    const agent = buildAgent(undefined, features, instructions);
     return agent.stream({ messages: modelMessages }).then((result) =>
       result.toUIMessageStreamResponse({
         // S1.3: never leak raw stack traces to the client; send a friendly
