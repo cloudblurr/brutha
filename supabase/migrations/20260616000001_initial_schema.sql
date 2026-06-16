@@ -173,7 +173,16 @@ create policy "workers: delete own" on public.workers
   for delete using (owner = auth.uid());
 
 -- Make workers part of the Realtime publication so the panel gets live updates.
-alter publication supabase_realtime add table public.workers;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public' and tablename = 'workers'
+  ) then
+    alter publication supabase_realtime add table public.workers;
+  end if;
+end $$;
 
 -- keep updated_at fresh on any update
 create or replace function public.touch_updated_at()
