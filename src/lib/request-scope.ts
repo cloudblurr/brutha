@@ -1,19 +1,35 @@
-import { auth } from "./auth";
-import { GLOBAL_SCOPE } from "./scope";
+import { createClient } from "./supabase/server";
+import { runWithDb, type Db } from "./scope";
 
 /**
- * Resolve the per-user data scope for the current request from the Auth.js
- * session. Returns the signed-in user's id, or the "global" fallback scope when
- * no one is signed in (preserves pre-auth single-operator behaviour).
+ * Resolve the per-request Supabase context (an RLS-scoped client + the
+ * signed-in user's id) from the request cookies, and run `fn` with it bound.
  *
- * Call this in API route handlers (server context) and pass the result into
- * `runWithScope(...)` so tools read the correct owner.
+ * Returns null user when unauthenticated — callers that require auth should
+ * check and return 401 before invoking the agent.
+ *
+ * This is the Supabase replacement for the old `resolveRequestScope()` +
+ * `runWithScope()` pairing.
  */
-export async function resolveRequestScope(): Promise<string> {
-  try {
-    const session = await auth();
-    return session?.user?.id || GLOBAL_SCOPE;
-  } catch {
-    return GLOBAL_SCOPE;
-  }
+export async function withRequestContext<T>(
+  fn: (ctx: { db: Db; userId: string }) => T | Promise<T>
+): Promise<{ userId: string | null; value?: T }> {
+  const db = (await createClient()) as unknown as Db;
+  const {
+    data: { user },
+  } = await db.auth.getUser();
+
+  if (!user) return { userId: null };
+
+  const value = await runWithDb(db, user.id, () => fn({ db, userId: user.id }));
+  return { userId: user.id, value };
+}
+
+/** Just the signed-in user's id for the current request (or null). */
+export async function resolveUserId(): Promise<string | null> {
+  const db = await createClient();
+  const {
+    data: { user },
+  } = await db.auth.getUser();
+  return user?.id ?? null;
 }

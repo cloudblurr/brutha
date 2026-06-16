@@ -1,13 +1,15 @@
 /**
  * Pure, dependency-free helpers for validating uploaded files.
  *
- * Extracted from the /api/upload route so the allow-list and size rules can be
- * unit-tested without spinning up Next.js or constructing a real File.
+ * Backend-agnostic: the allow-list and size rules are enforced before the file
+ * is streamed to Supabase Storage. Kept pure so they can be unit-tested without
+ * Next.js or a real File.
  */
 
-export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15 MB
+export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15 MB (matches bucket limit)
 
-// Allow-list of MIME types. Keep in sync with the composer's `accept` attr.
+// Allow-list of MIME types. Keep in sync with the composer's `accept` attr and
+// the Storage bucket's allowed_mime_types (see migrations).
 export const ALLOWED_UPLOAD_TYPES = new Set<string>([
   // images
   "image/png",
@@ -60,7 +62,7 @@ export function isTextLike(type: string): boolean {
   return TEXT_LIKE_RE.test(type);
 }
 
-/** Sanitize a user-supplied filename for safe on-disk storage. */
+/** Sanitize a user-supplied filename for safe storage. */
 export function safeFileName(name: string): string {
   return name.replace(/[^\w.\-]+/g, "_").slice(0, 120) || "upload";
 }

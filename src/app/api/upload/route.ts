@@ -1,30 +1,37 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import {
   ALLOWED_UPLOAD_TYPES,
   checkUpload,
   isTextLike,
   safeFileName,
 } from "@/lib/upload";
+import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 /**
- * File upload endpoint.
+ * File upload endpoint — backed by Supabase Storage.
  *
  * Accepts multipart/form-data with one `file` field. Validates against an
- * allow-list of types and a size cap (see src/lib/upload.ts), stores the file
- * under ./data/uploads (gitignored), and returns a reference the client
- * attaches to the next message. Text-like files also return extracted text so
- * the agent can read their contents; binary/image files return metadata + a
- * served URL.
+ * allow-list of types and a size cap (src/lib/upload.ts), uploads the file to
+ * the private `uploads` bucket under `<userId>/<uuid>__<safeName>` (RLS scopes
+ * it to the owner), and returns a reference the client attaches to the next
+ * message. Text-like files also return extracted text so the agent can read
+ * them inline; binary/image files return metadata + a served URL.
  */
 
-const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
+const BUCKET = "uploads";
 
 export async function POST(req: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let form: FormData;
   try {
     form = await req.formData();
@@ -48,10 +55,19 @@ export async function POST(req: Request) {
   }
 
   const buf = Buffer.from(await file.arrayBuffer());
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
   const id = randomUUID();
-  const stored = `${id}__${safeFileName(file.name)}`;
-  fs.writeFileSync(path.join(UPLOAD_DIR, stored), buf);
+  // Path is namespaced by user id so Storage RLS scopes access by owner.
+  const objectPath = `${user.id}/${id}__${safeFileName(file.name)}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(BUCKET)
+    .upload(objectPath, buf, { contentType: type, upsert: false });
+  if (uploadError) {
+    return Response.json(
+      { error: `Upload failed: ${uploadError.message}` },
+      { status: 500 }
+    );
+  }
 
   // Extract text for text-like files so the agent can read them inline.
   let text: string | undefined;
@@ -68,7 +84,12 @@ export async function POST(req: Request) {
     name: file.name,
     type,
     size: file.size,
-    url: `/api/files/${stored}`,
+    // The served URL proxies through /api/files/[...path] which mints a short-
+    // lived signed URL — keeps the bucket private while letting the client
+    // render the file. Encode each path segment individually so the slash
+    // between "<userId>" and "<file>" maps to the catch-all route segments.
+    url: `/api/files/${objectPath.split("/").map(encodeURIComponent).join("/")}`,
+    path: objectPath,
     isImage: type.startsWith("image/"),
     text,
     truncated,

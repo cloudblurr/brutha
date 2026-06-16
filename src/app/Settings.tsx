@@ -1,40 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSession, signIn as nextSignIn, signOut as nextSignOut } from "next-auth/react";
 import { Settings, User, X, LogIn, LogOut, Sun, Moon } from "./icons";
+import { useAuth, type AuthUser } from "./AuthProvider";
 
 /**
- * Settings menu + Profile modal backed by real Auth.js sessions.
+ * Settings menu + Profile modal backed by Supabase Auth.
  *
- * `useAuth()` wraps next-auth's useSession() and exposes the same shape the UI
- * already consumed from the old mock (user / ready / signOut), plus credential
- * + OAuth sign-in helpers. OAuth buttons only render for providers the server
- * actually has configured (discovered via /api/auth/providers).
+ * `useAuth()` (from AuthProvider) exposes the signed-in user plus credential +
+ * OAuth + sign-out helpers. OAuth buttons render for the providers configured
+ * via NEXT_PUBLIC_AUTH_PROVIDERS (a comma-separated list, e.g. "github,google").
  */
 
-export interface AuthUser {
-  id: string;
-  name: string;
-  email: string;
-  image?: string | null;
-}
+export type { AuthUser };
+export { useAuth };
 
-export function useAuth() {
-  const { data, status } = useSession();
-  const user: AuthUser | null = data?.user
-    ? {
-        id: data.user.id,
-        name: data.user.name ?? data.user.email ?? "User",
-        email: data.user.email ?? "",
-        image: data.user.image,
-      }
-    : null;
-  return {
-    user,
-    ready: status !== "loading",
-    signOut: () => nextSignOut({ redirect: false }),
-  };
+/** Which OAuth providers to show, from a build-time public env var. */
+function configuredProviders(): ("github" | "google")[] {
+  const raw = process.env.NEXT_PUBLIC_AUTH_PROVIDERS ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s): s is "github" | "google" => s === "github" || s === "google");
 }
 
 function initials(name: string) {
@@ -77,42 +64,31 @@ export function SettingsModal({
   open,
   onClose,
   user,
-  signOut,
   theme,
   onToggleTheme,
 }: {
   open: boolean;
   onClose: () => void;
   user: AuthUser | null;
-  signOut: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
 }) {
+  const { signInWithPassword, signUpWithPassword, signInWithOAuth, signOut } =
+    useAuth();
   const [signInEmail, setSignInEmail] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
   const [signInError, setSignInError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
-  const [oauthProviders, setOauthProviders] = useState<
-    { id: string; name: string }[]
-  >([]);
+  const oauthProviders = configuredProviders();
   const [emailFrom, setEmailFrom] = useState("");
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
 
-  // Load the email identity + which OAuth providers are configured.
+  // Load the email identity for the signed-in user.
   useEffect(() => {
     if (!open) return;
     fetch("/api/settings/email")
       .then((r) => r.json())
       .then((d) => setEmailFrom(d.from ?? ""))
-      .catch(() => {});
-    fetch("/api/auth/providers")
-      .then((r) => r.json())
-      .then((d: Record<string, { id: string; name: string }>) => {
-        const list = Object.values(d ?? {}).filter(
-          (p) => p.id === "github" || p.id === "google"
-        );
-        setOauthProviders(list);
-      })
       .catch(() => {});
   }, [open]);
 
@@ -134,14 +110,16 @@ export function SettingsModal({
     if (!signInEmail.trim() || !signInPassword) return;
     setSigningIn(true);
     setSignInError(null);
-    const res = await nextSignIn("credentials", {
-      email: signInEmail.trim(),
-      password: signInPassword,
-      redirect: false,
-    });
+    // Try sign-in; if the account doesn't exist, fall back to sign-up so the
+    // UX matches the old "Sign in / Sign up" combined button.
+    let { error } = await signInWithPassword(signInEmail.trim(), signInPassword);
+    if (error && /invalid login credentials/i.test(error)) {
+      const up = await signUpWithPassword(signInEmail.trim(), signInPassword);
+      error = up.error;
+    }
     setSigningIn(false);
-    if (res?.error) {
-      setSignInError("Invalid email or password.");
+    if (error) {
+      setSignInError(error);
     } else {
       setSignInPassword("");
     }
@@ -186,7 +164,7 @@ export function SettingsModal({
               </div>
               <button
                 type="button"
-                onClick={signOut}
+                onClick={() => signOut()}
                 className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-[var(--hover)]"
               >
                 <LogOut className="h-[15px] w-[15px]" /> Sign out
@@ -196,12 +174,13 @@ export function SettingsModal({
             <div className="mt-3 space-y-2">
               {oauthProviders.map((p) => (
                 <button
-                  key={p.id}
+                  key={p}
                   type="button"
-                  onClick={() => nextSignIn(p.id)}
+                  onClick={() => signInWithOAuth(p)}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-[var(--hover)]"
                 >
-                  <LogIn className="h-[16px] w-[16px]" /> Continue with {p.name}
+                  <LogIn className="h-[16px] w-[16px]" /> Continue with{" "}
+                  {p === "github" ? "GitHub" : "Google"}
                 </button>
               ))}
 

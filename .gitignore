@@ -37,9 +37,14 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local scratch / backups
+/.trash
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
-# local agent data (SQLite DB)
-/data
+# supabase local stack
+/supabase/.branches
+/supabase/.temp
+**/supabase/.env

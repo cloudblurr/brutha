@@ -1,18 +1,17 @@
-import { getSetting, setSetting } from "@/lib/db";
+import { getSetting, setSetting } from "@/lib/settings";
 import { isEmailConfigured } from "@/lib/email";
-import { resolveRequestScope } from "@/lib/request-scope";
+import { withRequestContext } from "@/lib/request-scope";
 
 export const runtime = "nodejs";
 
 /**
- * Email identity settings (onboarding).
+ * Email identity settings.
  *
  * GET  -> current "from" identity (stored or env fallback) + whether SMTP
  *         transport is configured.
  * POST -> set the "from" identity ({ from: "Name <addr@example.com>" }).
  *
- * Scoped per signed-in user (falls back to the "global" operator scope when
- * unauthenticated), so each user gets their own sender identity.
+ * Scoped per signed-in user via Supabase RLS. Unauthenticated requests get 401.
  */
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -25,18 +24,23 @@ function extractAddress(from: string): string | null {
 }
 
 export async function GET() {
-  const scope = await resolveRequestScope();
-  const stored = getSetting("email.from", scope);
-  const effective = stored || process.env.SMTP_FROM || process.env.SMTP_USER || null;
-  return Response.json({
-    from: effective,
-    source: stored ? "settings" : effective ? "env" : "unset",
-    smtpConfigured: isEmailConfigured(),
+  const { userId, value } = await withRequestContext(async () => {
+    const stored = await getSetting("email.from");
+    const effective =
+      stored || process.env.SMTP_FROM || process.env.SMTP_USER || null;
+    return {
+      from: effective,
+      source: stored ? "settings" : effective ? "env" : "unset",
+      smtpConfigured: isEmailConfigured(),
+    };
   });
+  if (!userId) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return Response.json(value);
 }
 
 export async function POST(req: Request) {
-  const scope = await resolveRequestScope();
   let from: unknown;
   try {
     ({ from } = await req.json());
@@ -55,6 +59,13 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-  setSetting("email.from", from.trim(), scope);
-  return Response.json({ saved: true, from: from.trim() });
+
+  const trimmed = from.trim();
+  const { userId } = await withRequestContext(async () => {
+    await setSetting("email.from", trimmed);
+  });
+  if (!userId) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return Response.json({ saved: true, from: trimmed });
 }

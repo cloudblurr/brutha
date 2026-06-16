@@ -1,9 +1,9 @@
 import nodemailer, { type Transporter } from "nodemailer";
-import { getSetting } from "./db";
+import { getSetting } from "./settings";
 
 /**
- * Email sending via SMTP. Configured entirely through environment variables
- * so no credentials are ever committed:
+ * Email sending via SMTP (nodemailer). Works on Vercel serverless — transport
+ * credentials come from environment variables so nothing is committed:
  *
  *   SMTP_HOST      e.g. smtp.gmail.com
  *   SMTP_PORT      e.g. 465 (SSL) or 587 (STARTTLS)
@@ -11,28 +11,26 @@ import { getSetting } from "./db";
  *   SMTP_PASS      your SMTP password or app-specific password
  *   SMTP_FROM      optional "From" address (defaults to SMTP_USER)
  *
- * If these are not set, the agent's sendEmail tool reports that email is
- * not configured instead of crashing.
+ * If these are not set, the agent's sendEmail tool reports that email is not
+ * configured instead of crashing.
  *
- * The "From" identity (display name + address shown to recipients) can be
- * overridden per scope at runtime via the `settings` table (key
- * "email.from"), configured during onboarding. This lets the operator — and
- * later, per-user once auth exists — set their own sender identity without
- * touching env or redeploying. SMTP transport credentials (host/auth) still
- * come from env; only the visible From line is overridable here.
+ * The visible "From" identity (display name + address) is overridable per user
+ * at runtime via the Supabase `settings` table (key "email.from"), configured in
+ * Settings. SMTP transport creds still come from env; only the From line is
+ * user-overridable.
  */
 
 /**
- * Resolve the "From" header. Prefers the onboarding-configured identity stored
- * in the settings table, falling back to SMTP_FROM, then SMTP_USER. The `scope`
- * is forward-looking for per-user identities once auth lands.
+ * Resolve the "From" header. Prefers the user-configured identity stored in the
+ * settings table (read via the request-scoped Supabase client), falling back to
+ * SMTP_FROM, then SMTP_USER.
  */
-export function getEmailIdentity(scope = "global"): string | undefined {
+export async function getEmailIdentity(): Promise<string | undefined> {
   try {
-    const stored = getSetting("email.from", scope);
+    const stored = await getSetting("email.from");
     if (stored && stored.trim()) return stored.trim();
   } catch {
-    // DB not ready / migration not run yet — fall back to env silently.
+    // No request context / DB not reachable — fall back to env silently.
   }
   return process.env.SMTP_FROM || process.env.SMTP_USER;
 }
@@ -68,8 +66,9 @@ export async function sendEmail(opts: {
   subject: string;
   body: string;
 }): Promise<{ messageId: string; accepted: string[] }> {
+  const from = await getEmailIdentity();
   const info = await getTransporter().sendMail({
-    from: getEmailIdentity(),
+    from,
     to: opts.to,
     subject: opts.subject,
     text: opts.body,

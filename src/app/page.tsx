@@ -462,7 +462,6 @@ export default function Home() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         user={auth.user}
-        signOut={auth.signOut}
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />

@@ -1,69 +1,60 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { signIn } from "next-auth/react";
+import { useState } from "react";
 import { LogIn } from "../icons";
+import { useAuth } from "../AuthProvider";
 
 /**
  * Client-side login form used by /login.
  *
- * Mirrors the SettingsModal sign-in UX but as a full page: OAuth buttons for
- * whichever providers the server has configured (discovered via
- * /api/auth/providers) plus an email/password credentials form. On success
- * Auth.js redirects to `callbackUrl` (default "/").
+ * OAuth buttons for providers configured via NEXT_PUBLIC_AUTH_PROVIDERS, plus an
+ * email/password form backed by Supabase Auth. On success we redirect to
+ * `redirectTo` (default "/"). A failed sign-in for a non-existent account falls
+ * back to sign-up so the combined "Sign in / Sign up" UX is preserved.
  */
 
-const ERROR_MESSAGES: Record<string, string> = {
-  CredentialsSignin: "Invalid email or password.",
-  OAuthAccountNotLinked:
-    "That email is already linked to a different sign-in method.",
-  default: "Could not sign you in. Please try again.",
-};
+function configuredProviders(): ("github" | "google")[] {
+  const raw = process.env.NEXT_PUBLIC_AUTH_PROVIDERS ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s): s is "github" | "google" => s === "github" || s === "google");
+}
 
 export function LoginForm({
-  callbackUrl = "/",
+  redirectTo = "/",
   initialError,
 }: {
-  callbackUrl?: string;
+  redirectTo?: string;
   initialError?: string;
 }) {
+  const { signInWithPassword, signUpWithPassword, signInWithOAuth } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(
-    initialError ? ERROR_MESSAGES[initialError] ?? ERROR_MESSAGES.default : null
+    initialError ? "Could not sign you in. Please try again." : null
   );
-  const [providers, setProviders] = useState<{ id: string; name: string }[]>([]);
-
-  useEffect(() => {
-    fetch("/api/auth/providers")
-      .then((r) => r.json())
-      .then((d: Record<string, { id: string; name: string }>) =>
-        setProviders(
-          Object.values(d ?? {}).filter(
-            (p) => p.id === "github" || p.id === "google"
-          )
-        )
-      )
-      .catch(() => {});
-  }, []);
+  const providers = configuredProviders();
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password) return;
     setBusy(true);
     setError(null);
-    const res = await signIn("credentials", {
-      email: email.trim(),
-      password,
-      redirect: false,
-    });
-    if (res?.error) {
-      setError(ERROR_MESSAGES.CredentialsSignin);
+
+    let { error: err } = await signInWithPassword(email.trim(), password);
+    if (err && /invalid login credentials/i.test(err)) {
+      const up = await signUpWithPassword(email.trim(), password);
+      err = up.error;
+    }
+
+    if (err) {
+      setError(err);
       setBusy(false);
     } else {
-      // Full reload so the server session is picked up everywhere.
-      window.location.href = callbackUrl;
+      // Full reload so the server session cookie is picked up everywhere.
+      window.location.href = redirectTo;
     }
   }
 
@@ -71,12 +62,13 @@ export function LoginForm({
     <div className="space-y-3">
       {providers.map((p) => (
         <button
-          key={p.id}
+          key={p}
           type="button"
-          onClick={() => signIn(p.id, { callbackUrl })}
+          onClick={() => signInWithOAuth(p)}
           className="flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium hover:bg-[var(--hover)]"
         >
-          <LogIn className="h-[16px] w-[16px]" /> Continue with {p.name}
+          <LogIn className="h-[16px] w-[16px]" /> Continue with{" "}
+          {p === "github" ? "GitHub" : "Google"}
         </button>
       ))}
 

@@ -1,23 +1,49 @@
 import { z } from "zod";
 
 /**
- * Server environment validation (S5).
+ * Server environment validation.
  *
  * Fail fast with a clear, actionable message when required configuration is
  * missing or malformed, instead of surfacing a confusing runtime error deep in
- * a request. Optional integrations (email, Temporal) are validated only for
- * shape, never required.
+ * a request. Optional integrations (email) are validated only for shape.
+ *
+ * Required:
+ *   PUTER_AUTH_TOKEN                 — Puter account token; powers Grok inference.
+ *   NEXT_PUBLIC_SUPABASE_URL         — Supabase project URL.
+ *   NEXT_PUBLIC_SUPABASE_ANON_KEY    — Supabase anon/public key.
+ *
+ * Server-only Supabase keys (SUPABASE_SERVICE_ROLE_KEY) are validated where
+ * used (admin client / Edge Function), not required for every request.
  */
 const envSchema = z.object({
-  // Required: the agent cannot run without an xAI key.
-  XAI_API_KEY: z
-    .string({ message: "XAI_API_KEY is required" })
-    .min(1, "XAI_API_KEY must not be empty"),
+  // Required: BRUTHA's inference runs on xAI Grok served via Puter.js; the
+  // Puter account auth token authenticates those calls.
+  PUTER_AUTH_TOKEN: z
+    .string({ message: "PUTER_AUTH_TOKEN is required" })
+    .min(1, "PUTER_AUTH_TOKEN must not be empty"),
+
+  // Optional: only needed if you point image generation at xAI directly.
+  XAI_API_KEY: z.string().optional(),
+
+  // Required: Supabase connection (public values, safe to expose to the client).
+  NEXT_PUBLIC_SUPABASE_URL: z
+    .string({ message: "NEXT_PUBLIC_SUPABASE_URL is required" })
+    .url("NEXT_PUBLIC_SUPABASE_URL must be a valid URL"),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z
+    .string({ message: "NEXT_PUBLIC_SUPABASE_ANON_KEY is required" })
+    .min(1, "NEXT_PUBLIC_SUPABASE_ANON_KEY must not be empty"),
 
   // Optional model + tuning knobs.
   XAI_MODEL: z.string().min(1).optional(),
+  XAI_IMAGE_MODEL: z.string().min(1).optional(),
   AGENT_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
   AGENT_MAX_STEPS: z.coerce.number().int().min(1).max(100).optional(),
+
+  // Optional service-role key (server-only; never exposed to the browser).
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+
+  // Optional which OAuth providers to surface in the UI (comma-separated).
+  NEXT_PUBLIC_AUTH_PROVIDERS: z.string().optional(),
 
   // Optional email (SMTP). All-or-nothing is enforced softly by the tool.
   SMTP_HOST: z.string().optional(),
@@ -26,22 +52,6 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
   TEST_EMAIL_TO: z.string().optional(),
-
-  // Optional Temporal durable execution.
-  TEMPORAL_ADDRESS: z.string().optional(),
-  TEMPORAL_NAMESPACE: z.string().optional(),
-  TEMPORAL_API_KEY: z.string().optional(),
-  TEMPORAL_TASK_QUEUE: z.string().optional(),
-  AGENT_DURABLE: z.enum(["0", "1"]).optional(),
-
-  // Optional authentication (Auth.js). All optional so the app runs with zero
-  // config (dev credentials fallback). Set AUTH_SECRET in production.
-  AUTH_SECRET: z.string().optional(),
-  AUTH_GITHUB_ID: z.string().optional(),
-  AUTH_GITHUB_SECRET: z.string().optional(),
-  AUTH_GOOGLE_ID: z.string().optional(),
-  AUTH_GOOGLE_SECRET: z.string().optional(),
-  AUTH_ALLOW_DEV_LOGIN: z.enum(["0", "1"]).optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

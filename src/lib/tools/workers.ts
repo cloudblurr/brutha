@@ -1,56 +1,119 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { createWorker, listWorkers, getWorker } from "../workers";
-import { currentScope } from "../scope";
+import { currentDb } from "../scope";
 
 /**
- * BRUTHA Workers tools. Let the agent spawn and inspect background agent jobs
- * in response to natural-language requests like "in the background, research X
- * and write me a summary". Gated behind the `workers` feature flag (agent.ts).
+ * Worker tools — background agent jobs, backed by the Supabase `workers` table.
+ *
+ * Creating a worker simply INSERTs a row (status 'queued'). A Postgres trigger
+ * (`workers_dispatch`, see migrations) then calls the `run-worker` Edge Function
+ * over HTTP, which executes the agent loop and writes status/result/progress
+ * back using the service-role key. The UI subscribes to changes via Realtime.
+ *
+ * This replaces the old Temporal + in-process worker store. Per-user isolation
+ * is enforced by Row Level Security: the request-scoped Supabase client
+ * (`currentDb()`) carries the user's JWT, so a user can only ever see, create,
+ * or delete their own workers.
  */
+
+function errMsg(e: unknown) {
+  return e instanceof Error ? e.message : String(e);
+}
+
 export const workerTools = {
   createWorker: tool({
     description:
-      "Spawn a BRUTHA Worker: a background task that runs autonomously and produces a result the user can check later. Use when the user asks to do something 'in the background', 'as a worker', or a long task they don't want to wait for. Returns the worker id.",
+      "Spawn a BRUTHA Worker to handle a task 'in the background'. Use when the user explicitly wants something done in the background or asynchronously. Returns the worker id; the user can check back for the result later (it does not block).",
     inputSchema: z.object({
-      title: z.string().describe("Short human-friendly title for the task."),
-      task: z
+      task: z.string().describe("What the background worker should do."),
+      title: z
         .string()
-        .describe("The full, self-contained instruction the background agent should carry out."),
+        .optional()
+        .describe("Short label for the worker (defaults to the task text)."),
     }),
-    execute: async ({ title, task }) => {
+    execute: async ({ task, title }) => {
       try {
-        // Own the worker by the current request's user scope so it reads/writes
-        // the right user's data and is only listed for that user.
-        const w = createWorker(title, task, currentScope());
-        return { spawned: true, id: w.id, title: w.title, status: w.status };
+        const trimmed = task.trim();
+        if (!trimmed) return { error: "Provide a non-empty task." };
+        const { data, error } = await currentDb()
+          .from("workers")
+          .insert({
+            title: (title?.trim() || trimmed).slice(0, 80),
+            task: trimmed,
+            status: "queued",
+          })
+          .select("id, title, status")
+          .single();
+        if (error) throw error;
+        return {
+          spawned: true,
+          id: data.id,
+          title: data.title,
+          status: data.status,
+          note: "Worker queued. It runs in the background; check back with listWorkers or getWorkerResult.",
+        };
       } catch (e) {
-        return { error: `Failed to spawn worker: ${e instanceof Error ? e.message : String(e)}` };
+        return { error: `Failed to spawn worker: ${errMsg(e)}` };
       }
     },
   }),
 
   listWorkers: tool({
-    description: "List the user's BRUTHA Workers (background tasks) and their statuses.",
+    description:
+      "List the user's background workers and their statuses (queued/running/done/error), most recent first.",
     inputSchema: z.object({}),
     execute: async () => {
-      const workers = listWorkers(currentScope()).map((w) => ({
-        id: w.id,
-        title: w.title,
-        status: w.status,
-        createdAt: w.createdAt,
-      }));
-      return { workers, count: workers.length };
+      try {
+        const { data, error } = await currentDb()
+          .from("workers")
+          .select("id, title, status, progress, created_at")
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (error) throw error;
+        return { count: data.length, workers: data };
+      } catch (e) {
+        return { error: `Failed to list workers: ${errMsg(e)}` };
+      }
     },
   }),
 
   getWorkerResult: tool({
-    description: "Get the result/status of a specific BRUTHA Worker by id.",
+    description:
+      "Fetch a single background worker's full record by id — its status and, when finished, its result or error.",
+    inputSchema: z.object({ id: z.string().describe("The worker id (uuid).") }),
+    execute: async ({ id }) => {
+      try {
+        const { data, error } = await currentDb()
+          .from("workers")
+          .select("id, title, task, status, result, error, progress, created_at, updated_at")
+          .eq("id", id)
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) return { error: `No worker with id ${id}.` };
+        return { worker: data };
+      } catch (e) {
+        return { error: `Failed to get worker: ${errMsg(e)}` };
+      }
+    },
+  }),
+
+  deleteWorker: tool({
+    description: "Delete a background worker by id.",
     inputSchema: z.object({ id: z.string() }),
     execute: async ({ id }) => {
-      const w = getWorker(id);
-      if (!w || w.scope !== currentScope()) return { error: `No worker with id ${id}` };
-      return { id: w.id, title: w.title, status: w.status, result: w.result, error: w.error };
+      try {
+        const { data, error } = await currentDb()
+          .from("workers")
+          .delete()
+          .eq("id", id)
+          .select("id");
+        if (error) throw error;
+        return data.length
+          ? { deleted: true, id }
+          : { error: `No worker with id ${id}.` };
+      } catch (e) {
+        return { error: `Failed to delete worker: ${errMsg(e)}` };
+      }
     },
   }),
 };

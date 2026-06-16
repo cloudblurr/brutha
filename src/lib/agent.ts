@@ -5,7 +5,7 @@ import {
   type UIMessage,
   type ModelMessage,
 } from "ai";
-import { xai } from "@ai-sdk/xai";
+import { puterModel, DEFAULT_PUTER_MODEL } from "./puter";
 import { getAllTools, getToolsForFeatures, type FeatureFlags } from "./tool-registry";
 
 /**
@@ -39,7 +39,7 @@ export const tools = getAllTools();
  * steps it may take before stopping.
  */
 export interface AgentConfig {
-  /** Grok model id, e.g. "grok-3", "grok-4". */
+  /** Puter Grok model id, e.g. "x-ai/grok-4-1-fast", "x-ai/grok-4.3". */
   model: string;
   /** Sampling temperature. Lower = more deterministic tool use. */
   temperature: number;
@@ -59,7 +59,7 @@ export function resolveAgentConfig(
   overrides: Partial<AgentConfig> = {}
 ): AgentConfig {
   return {
-    model: overrides.model ?? process.env.XAI_MODEL ?? "grok-3",
+    model: overrides.model ?? process.env.XAI_MODEL ?? DEFAULT_PUTER_MODEL,
     // Default to a low temperature so tool selection is stable and repeatable.
     temperature: overrides.temperature ?? numFromEnv("AGENT_TEMPERATURE", 0.2),
     maxSteps: overrides.maxSteps ?? numFromEnv("AGENT_MAX_STEPS", 14),
@@ -102,7 +102,7 @@ export function buildAgent(
   features?: Partial<FeatureFlags>
 ) {
   return new ToolLoopAgent({
-    model: xai(config.model),
+    model: puterModel(config.model),
     instructions: SYSTEM_PROMPT,
     tools: features ? getToolsForFeatures(features) : tools,
     temperature: config.temperature,
@@ -111,10 +111,17 @@ export function buildAgent(
 }
 
 /**
- * Default singleton agent, built from environment config. Kept as a named
- * export for backwards compatibility with existing imports.
+ * Default agent accessor, built lazily from environment config. Kept as a named
+ * export for backwards compatibility. Lazy (not a module-load constant) so that
+ * importing this module never throws when PUTER_AUTH_TOKEN is unset — routes can
+ * still return a clean "misconfigured" 500 via env validation instead of
+ * crashing at import time.
  */
-export const grokAgent = buildAgent();
+let _grokAgent: ReturnType<typeof buildAgent> | null = null;
+export function getGrokAgent() {
+  if (!_grokAgent) _grokAgent = buildAgent();
+  return _grokAgent;
+}
 
 /**
  * Optional per-step callback. Receives a short human-readable label describing

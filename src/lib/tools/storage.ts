@@ -1,20 +1,23 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getDb } from "../db";
-import { currentScope } from "../scope";
+import { currentDb } from "../scope";
+import type { Database } from "../supabase/database.types";
 
 function errMsg(e: unknown) {
   return e instanceof Error ? e.message : String(e);
 }
 
 /**
- * Storage tools (contacts, notes, tasks) are PER-USER scoped.
+ * Storage tools (contacts, notes, tasks) — backed by Supabase Postgres.
  *
- * Every row carries a `scope` column equal to its owner's user id (or "global"
- * for the unauthenticated single-operator fallback). The scope for the current
- * request is read from AsyncLocalStorage via `currentScope()` — set at the
- * request boundary by the chat/workers routes. All reads, updates and deletes
- * filter by scope so users can only ever see and mutate their own data.
+ * Per-user isolation is enforced by Row Level Security: every table has an
+ * `owner` column defaulting to auth.uid(), and policies restrict all access to
+ * `owner = auth.uid()`. The Supabase client bound to the request (via
+ * `currentDb()`) carries the user's JWT, so RLS scopes every read/write to that
+ * user automatically — no manual scope filtering needed.
+ *
+ * Notes full-text search uses the Postgres `search_notes` RPC (tsvector +
+ * websearch_to_tsquery), the direct replacement for the old SQLite FTS5 table.
  */
 
 export const storageTools = {
@@ -30,12 +33,13 @@ export const storageTools = {
     }),
     execute: async ({ name, email, phone, notes }) => {
       try {
-        const info = getDb()
-          .prepare(
-            "INSERT INTO contacts (name, email, phone, notes, scope) VALUES (?, ?, ?, ?, ?)"
-          )
-          .run(name, email ?? null, phone ?? null, notes ?? null, currentScope());
-        return { saved: true, id: Number(info.lastInsertRowid), name };
+        const { data, error } = await currentDb()
+          .from("contacts")
+          .insert({ name, email: email ?? null, phone: phone ?? null, notes: notes ?? null })
+          .select("id")
+          .single();
+        if (error) throw error;
+        return { saved: true, id: data.id, name };
       } catch (e) {
         return { error: `Failed to save contact: ${errMsg(e)}` };
       }
@@ -49,14 +53,14 @@ export const storageTools = {
     execute: async ({ query }) => {
       try {
         const like = `%${query}%`;
-        const rows = getDb()
-          .prepare(
-            `SELECT id, name, email, phone, notes FROM contacts
-             WHERE scope = ? AND (name LIKE ? OR email LIKE ? OR phone LIKE ?)
-             ORDER BY name LIMIT 10`
-          )
-          .all(currentScope(), like, like, like);
-        return { count: rows.length, contacts: rows };
+        const { data, error } = await currentDb()
+          .from("contacts")
+          .select("id, name, email, phone, notes")
+          .or(`name.ilike.${like},email.ilike.${like},phone.ilike.${like}`)
+          .order("name")
+          .limit(10);
+        if (error) throw error;
+        return { count: data.length, contacts: data };
       } catch (e) {
         return { error: `Failed to search contacts: ${errMsg(e)}` };
       }
@@ -68,12 +72,13 @@ export const storageTools = {
     inputSchema: z.object({}),
     execute: async () => {
       try {
-        const rows = getDb()
-          .prepare(
-            "SELECT id, name, email, phone FROM contacts WHERE scope = ? ORDER BY name LIMIT 100"
-          )
-          .all(currentScope());
-        return { count: rows.length, contacts: rows };
+        const { data, error } = await currentDb()
+          .from("contacts")
+          .select("id, name, email, phone")
+          .order("name")
+          .limit(100);
+        if (error) throw error;
+        return { count: data.length, contacts: data };
       } catch (e) {
         return { error: `Failed to list contacts: ${errMsg(e)}` };
       }
@@ -92,30 +97,19 @@ export const storageTools = {
     }),
     execute: async ({ id, name, email, phone, notes }) => {
       try {
-        const sets: string[] = [];
-        const vals: unknown[] = [];
-        if (name !== undefined) {
-          sets.push("name = ?");
-          vals.push(name);
-        }
-        if (email !== undefined) {
-          sets.push("email = ?");
-          vals.push(email);
-        }
-        if (phone !== undefined) {
-          sets.push("phone = ?");
-          vals.push(phone);
-        }
-        if (notes !== undefined) {
-          sets.push("notes = ?");
-          vals.push(notes);
-        }
-        if (sets.length === 0) return { error: "No fields to update." };
-        vals.push(id, currentScope());
-        const info = getDb()
-          .prepare(`UPDATE contacts SET ${sets.join(", ")} WHERE id = ? AND scope = ?`)
-          .run(...vals);
-        return info.changes
+        const patch: Database["public"]["Tables"]["contacts"]["Update"] = {};
+        if (name !== undefined) patch.name = name;
+        if (email !== undefined) patch.email = email;
+        if (phone !== undefined) patch.phone = phone;
+        if (notes !== undefined) patch.notes = notes;
+        if (Object.keys(patch).length === 0) return { error: "No fields to update." };
+        const { data, error } = await currentDb()
+          .from("contacts")
+          .update(patch)
+          .eq("id", id)
+          .select("id");
+        if (error) throw error;
+        return data.length
           ? { updated: true, id }
           : { error: `No contact with id ${id}.` };
       } catch (e) {
@@ -129,10 +123,13 @@ export const storageTools = {
     inputSchema: z.object({ id: z.number().int() }),
     execute: async ({ id }) => {
       try {
-        const info = getDb()
-          .prepare("DELETE FROM contacts WHERE id = ? AND scope = ?")
-          .run(id, currentScope());
-        return info.changes
+        const { data, error } = await currentDb()
+          .from("contacts")
+          .delete()
+          .eq("id", id)
+          .select("id");
+        if (error) throw error;
+        return data.length
           ? { deleted: true, id }
           : { error: `No contact with id ${id}.` };
       } catch (e) {
@@ -151,10 +148,13 @@ export const storageTools = {
     }),
     execute: async ({ content, title }) => {
       try {
-        const info = getDb()
-          .prepare("INSERT INTO notes (title, content, scope) VALUES (?, ?, ?)")
-          .run(title ?? null, content, currentScope());
-        return { saved: true, id: Number(info.lastInsertRowid), title };
+        const { data, error } = await currentDb()
+          .from("notes")
+          .insert({ title: title ?? null, content })
+          .select("id")
+          .single();
+        if (error) throw error;
+        return { saved: true, id: data.id, title };
       } catch (e) {
         return { error: `Failed to save note: ${errMsg(e)}` };
       }
@@ -166,20 +166,14 @@ export const storageTools = {
     inputSchema: z.object({ query: z.string() }),
     execute: async ({ query }) => {
       try {
-        const fts = query
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((t) => `"${t.replace(/"/g, '""')}"`)
-          .join(" OR ");
-        if (!fts) return { count: 0, notes: [] };
-        const rows = getDb()
-          .prepare(
-            `SELECT n.id, n.title, n.content, n.createdAt
-             FROM notes_fts f JOIN notes n ON n.id = f.rowid
-             WHERE notes_fts MATCH ? AND n.scope = ? ORDER BY rank LIMIT 10`
-          )
-          .all(fts, currentScope());
-        return { count: rows.length, notes: rows };
+        const q = query.trim();
+        if (!q) return { count: 0, notes: [] };
+        const { data, error } = await currentDb().rpc("search_notes", {
+          q,
+          max_results: 10,
+        });
+        if (error) throw error;
+        return { count: data.length, notes: data };
       } catch (e) {
         return { error: `Failed to search notes: ${errMsg(e)}` };
       }
@@ -191,12 +185,13 @@ export const storageTools = {
     inputSchema: z.object({}),
     execute: async () => {
       try {
-        const rows = getDb()
-          .prepare(
-            "SELECT id, title, content, createdAt FROM notes WHERE scope = ? ORDER BY id DESC LIMIT 50"
-          )
-          .all(currentScope());
-        return { count: rows.length, notes: rows };
+        const { data, error } = await currentDb()
+          .from("notes")
+          .select("id, title, content, created_at")
+          .order("id", { ascending: false })
+          .limit(50);
+        if (error) throw error;
+        return { count: data.length, notes: data };
       } catch (e) {
         return { error: `Failed to list notes: ${errMsg(e)}` };
       }
@@ -208,10 +203,13 @@ export const storageTools = {
     inputSchema: z.object({ id: z.number().int() }),
     execute: async ({ id }) => {
       try {
-        const info = getDb()
-          .prepare("DELETE FROM notes WHERE id = ? AND scope = ?")
-          .run(id, currentScope());
-        return info.changes
+        const { data, error } = await currentDb()
+          .from("notes")
+          .delete()
+          .eq("id", id)
+          .select("id");
+        if (error) throw error;
+        return data.length
           ? { deleted: true, id }
           : { error: `No note with id ${id}.` };
       } catch (e) {
@@ -230,10 +228,13 @@ export const storageTools = {
     }),
     execute: async ({ task, due }) => {
       try {
-        const info = getDb()
-          .prepare("INSERT INTO tasks (task, due, scope) VALUES (?, ?, ?)")
-          .run(task, due ?? null, currentScope());
-        return { added: true, id: Number(info.lastInsertRowid), task, due };
+        const { data, error } = await currentDb()
+          .from("tasks")
+          .insert({ task, due: due ?? null })
+          .select("id")
+          .single();
+        if (error) throw error;
+        return { added: true, id: data.id, task, due };
       } catch (e) {
         return { error: `Failed to add task: ${errMsg(e)}` };
       }
@@ -247,13 +248,16 @@ export const storageTools = {
     }),
     execute: async ({ includeDone }) => {
       try {
-        const doneClause = includeDone ? "" : "AND done = 0";
-        const rows = getDb()
-          .prepare(
-            `SELECT id, task, due, done FROM tasks WHERE scope = ? ${doneClause} ORDER BY done, id LIMIT 100`
-          )
-          .all(currentScope());
-        return { count: rows.length, tasks: rows };
+        let q = currentDb()
+          .from("tasks")
+          .select("id, task, due, done");
+        if (!includeDone) q = q.eq("done", false);
+        const { data, error } = await q
+          .order("done")
+          .order("id")
+          .limit(100);
+        if (error) throw error;
+        return { count: data.length, tasks: data };
       } catch (e) {
         return { error: `Failed to list tasks: ${errMsg(e)}` };
       }
@@ -265,10 +269,13 @@ export const storageTools = {
     inputSchema: z.object({ id: z.number().int() }),
     execute: async ({ id }) => {
       try {
-        const info = getDb()
-          .prepare("UPDATE tasks SET done = 1 WHERE id = ? AND scope = ?")
-          .run(id, currentScope());
-        return info.changes
+        const { data, error } = await currentDb()
+          .from("tasks")
+          .update({ done: true })
+          .eq("id", id)
+          .select("id");
+        if (error) throw error;
+        return data.length
           ? { completed: true, id }
           : { error: `No task with id ${id}.` };
       } catch (e) {
@@ -282,10 +289,13 @@ export const storageTools = {
     inputSchema: z.object({ id: z.number().int() }),
     execute: async ({ id }) => {
       try {
-        const info = getDb()
-          .prepare("DELETE FROM tasks WHERE id = ? AND scope = ?")
-          .run(id, currentScope());
-        return info.changes
+        const { data, error } = await currentDb()
+          .from("tasks")
+          .delete()
+          .eq("id", id)
+          .select("id");
+        if (error) throw error;
+        return data.length
           ? { deleted: true, id }
           : { error: `No task with id ${id}.` };
       } catch (e) {

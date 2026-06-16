@@ -1,58 +1,68 @@
 import { test, describe } from "vitest";
 import assert from "node:assert/strict";
-import { normalizeScope, GLOBAL_SCOPE, currentScope, runWithScope } from "../src/lib/scope";
+import { runWithDb, currentDb, currentUserId, type Db } from "../src/lib/scope";
 
-describe("scope normalization", () => {
-  test("empty / null / whitespace collapse to the global scope", () => {
-    assert.equal(normalizeScope(null), GLOBAL_SCOPE);
-    assert.equal(normalizeScope(undefined), GLOBAL_SCOPE);
-    assert.equal(normalizeScope(""), GLOBAL_SCOPE);
-    assert.equal(normalizeScope("   "), GLOBAL_SCOPE);
+/**
+ * Scope is now an RLS-bound Supabase client + user id carried in
+ * AsyncLocalStorage (replaces the old text-"scope" string). We don't need a
+ * real Supabase client to test propagation — a sentinel object is enough to
+ * assert the right context flows through awaits and nesting.
+ */
+
+// A stand-in for the Supabase client; identity is all these tests check.
+function fakeDb(tag: string): Db {
+  return { __tag: tag } as unknown as Db;
+}
+
+describe("currentDb / currentUserId (AsyncLocalStorage)", () => {
+  test("currentUserId is null outside any context", () => {
+    assert.equal(currentUserId(), null);
   });
 
-  test("a real user id is preserved (trimmed)", () => {
-    assert.equal(normalizeScope("user-123"), "user-123");
-    assert.equal(normalizeScope("  user-123  "), "user-123");
-  });
-});
-
-describe("runWithScope / currentScope (AsyncLocalStorage)", () => {
-  test("defaults to global outside any scope", () => {
-    assert.equal(currentScope(), GLOBAL_SCOPE);
+  test("currentDb throws outside any context (programming error)", () => {
+    assert.throws(() => currentDb(), /No Supabase context bound/);
   });
 
-  test("binds the scope inside the callback", () => {
-    runWithScope("alice", () => {
-      assert.equal(currentScope(), "alice");
+  test("binds db + userId inside the callback", () => {
+    const db = fakeDb("alice");
+    runWithDb(db, "alice", () => {
+      assert.equal(currentDb(), db);
+      assert.equal(currentUserId(), "alice");
     });
   });
 
   test("propagates across awaits", async () => {
-    await runWithScope("bob", async () => {
+    const db = fakeDb("bob");
+    await runWithDb(db, "bob", async () => {
       await Promise.resolve();
-      assert.equal(currentScope(), "bob");
+      assert.equal(currentUserId(), "bob");
+      assert.equal(currentDb(), db);
     });
   });
 
-  test("nested scopes restore the outer value", () => {
-    runWithScope("outer", () => {
-      runWithScope("inner", () => {
-        assert.equal(currentScope(), "inner");
+  test("nested contexts restore the outer value", () => {
+    const outer = fakeDb("outer");
+    const inner = fakeDb("inner");
+    runWithDb(outer, "outer", () => {
+      runWithDb(inner, "inner", () => {
+        assert.equal(currentUserId(), "inner");
+        assert.equal(currentDb(), inner);
       });
-      assert.equal(currentScope(), "outer");
+      assert.equal(currentUserId(), "outer");
+      assert.equal(currentDb(), outer);
     });
-    assert.equal(currentScope(), GLOBAL_SCOPE);
+    assert.equal(currentUserId(), null);
   });
 
-  test("concurrent scopes do not leak into each other", async () => {
+  test("concurrent contexts do not leak into each other", async () => {
     const results: string[] = [];
     await Promise.all([
-      runWithScope("a", async () => {
+      runWithDb(fakeDb("a"), "a", async () => {
         await new Promise((r) => setTimeout(r, 5));
-        results.push(currentScope());
+        results.push(currentUserId()!);
       }),
-      runWithScope("b", async () => {
-        results.push(currentScope());
+      runWithDb(fakeDb("b"), "b", async () => {
+        results.push(currentUserId()!);
       }),
     ]);
     assert.deepEqual(results.sort(), ["a", "b"]);

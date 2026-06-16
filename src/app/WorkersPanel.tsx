@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Bot, X, Refresh } from "./icons";
+import { createClient } from "@/lib/supabase/client";
 
 /**
  * BRUTHA Workers panel — shows background agent jobs and their live status.
- * Polls /api/workers while open and while any worker is still running.
+ *
+ * Initial state is loaded from /api/workers, then we subscribe to Supabase
+ * Realtime (postgres_changes on public.workers) for instant live updates —
+ * replacing the old interval polling. RLS scopes the stream to the user's rows.
  */
 
 interface Worker {
@@ -16,13 +20,12 @@ interface Worker {
   result: string | null;
   error: string | null;
   progress: string | null;
-  createdAt: string;
+  created_at: string;
 }
 
 export function WorkersPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -34,21 +37,42 @@ export function WorkersPanel({ open, onClose }: { open: boolean; onClose: () => 
     }
   }, []);
 
+  // Initial load whenever the panel opens.
   useEffect(() => {
     if (!open) return;
-    // Intentional: load workers when the panel opens, then poll. Poll faster
-    // while a worker is actively running so the live progress line feels
-    // responsive, and back off when everything is settled.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    const anyRunning = workers.some(
-      (w) => w.status === "running" || w.status === "queued"
-    );
-    timer.current = setInterval(load, anyRunning ? 1500 : 4000);
+  }, [open, load]);
+
+  // Live updates via Supabase Realtime while the panel is open.
+  useEffect(() => {
+    if (!open) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel("workers-panel")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "workers" },
+        (payload) => {
+          setWorkers((prev) => {
+            if (payload.eventType === "DELETE") {
+              return prev.filter((w) => w.id !== (payload.old as Worker).id);
+            }
+            const row = payload.new as Worker;
+            const idx = prev.findIndex((w) => w.id === row.id);
+            if (idx === -1) return [row, ...prev];
+            const next = prev.slice();
+            next[idx] = row;
+            return next;
+          });
+        }
+      )
+      .subscribe();
+
     return () => {
-      if (timer.current) clearInterval(timer.current);
+      supabase.removeChannel(channel);
     };
-  }, [open, load, workers]);
+  }, [open]);
 
   if (!open) return null;
 

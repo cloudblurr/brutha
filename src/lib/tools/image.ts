@@ -2,24 +2,23 @@ import { tool, experimental_generateImage as generateImage } from "ai";
 import { xai } from "@ai-sdk/xai";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
+import { currentDb, currentUserId } from "../scope";
 
 /**
- * Image generation tool (xAI grok-imagine).
+ * Image generation tool (xAI grok-imagine) — backed by Supabase Storage.
  *
  * Gated behind the per-request `imageGen` feature flag (see agent.ts). When the
  * user enables Image Generation in the composer, this tool is added to the
- * agent's toolset. It calls xAI's image model, writes the PNG under
- * ./data/uploads (served via /api/files/<name>), and returns a URL the client
- * renders inline.
+ * agent's toolset. It calls xAI's image model, uploads the PNG to the private
+ * `uploads` bucket under the user's namespace (served via /api/files/<path>),
+ * and returns a URL the client renders inline.
  *
  * If the model/key doesn't support image generation, it returns a clean error
  * instead of throwing — the agent reports it to the user.
  */
 
 const IMAGE_MODEL = process.env.XAI_IMAGE_MODEL || "grok-imagine-image";
-const UPLOAD_DIR = path.join(process.cwd(), "data", "uploads");
+const BUCKET = "uploads";
 
 export const imageTools = {
   generateImage: tool({
@@ -34,15 +33,39 @@ export const imageTools = {
     }),
     execute: async ({ prompt, aspectRatio }) => {
       try {
+        // Image generation uses xAI directly (the agent's text inference runs
+        // on Grok via Puter; image models aren't exposed through the Puter
+        // OpenAI-compatible chat endpoint). Requires XAI_API_KEY; if it's not
+        // set, report cleanly instead of throwing a confusing SDK error.
+        if (!process.env.XAI_API_KEY) {
+          return {
+            error:
+              "Image generation is not configured. Set XAI_API_KEY to enable the generateImage tool (text chat runs on Grok via Puter and needs no xAI key).",
+          };
+        }
         const { image } = await generateImage({
           model: xai.imageModel(IMAGE_MODEL),
           prompt,
           aspectRatio: aspectRatio ?? "1:1",
         });
-        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-        const stored = `${randomUUID()}__generated.png`;
-        fs.writeFileSync(path.join(UPLOAD_DIR, stored), Buffer.from(image.uint8Array));
-        const url = `/api/files/${stored}`;
+
+        const userId = currentUserId();
+        if (!userId) {
+          return { error: "No authenticated user; cannot store generated image." };
+        }
+        const objectPath = `${userId}/${randomUUID()}__generated.png`;
+        const { error } = await currentDb()
+          .storage.from(BUCKET)
+          .upload(objectPath, Buffer.from(image.uint8Array), {
+            contentType: "image/png",
+            upsert: false,
+          });
+        if (error) throw error;
+
+        const url = `/api/files/${objectPath
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`;
         return { created: true, url, prompt, aspectRatio: aspectRatio ?? "1:1" };
       } catch (e) {
         return {

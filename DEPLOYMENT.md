@@ -1,92 +1,74 @@
 # Deploying BRUTHA (Grok Agent)
 
-## ⚠️ Why NOT Vercel
-This app is a **stateful, long-lived Node server**:
-- `better-sqlite3` writes the database to `./data/agent.db`
-- file uploads + generated images are written to `./data/uploads`
-- `instrumentation.ts` resumes background workers on boot
-- in-process workers run after the HTTP response is sent
+BRUTHA is now **stateless**: auth, data (Postgres), file storage, and background
+workers all live in **Supabase**. There is no SQLite file, no local upload
+directory, and no in-process worker loop to keep alive — so it deploys cleanly to
+any Node host **including Vercel** (the old "no Vercel" constraint is gone).
 
-Vercel serverless functions have a **read-only filesystem** (only `/tmp`, which
-is ephemeral and per-invocation) and **no long-lived process**. So on Vercel,
-every route that touches the DB returns **500**:
-`/api/workers`, `/api/settings/email`, `/api/upload`, plus anything using
-contacts/notes/tasks. This is the cause of the 500s seen on the Vercel link.
+## 1. Provision Supabase
 
-Fix = deploy on a platform with a persistent disk + a real server process.
-
----
-
-## Option A — Render (recommended, Blueprint included)
-1. Push this repo to GitHub (already on `cloudblurr/grok-agent`).
-2. Render dashboard → **New → Blueprint** → select the repo. It reads
-   `render.yaml` (Docker runtime + a 5 GB persistent disk mounted at
-   `/app/data` + auto-generated `AUTH_SECRET`).
-3. Set the one secret it can't generate: **`XAI_API_KEY`** (dashboard → the
-   service → Environment).
-4. Deploy. First boot runs DB migrations automatically (schema v5).
-5. App is at `https://brutha.onrender.com` (or your chosen name).
-
-The persistent disk at `/app/data` is the whole trick — it keeps the SQLite DB
-and uploads across restarts/redeploys. Without it they'd reset every deploy.
-
-> Note: Render's **free** tier has no persistent disk; you need **Starter**
-> ($7/mo) or higher for the disk. Free web services also cold-start/sleep.
-
----
-
-## Option B — Railway
-1. Railway → New Project → Deploy from GitHub repo.
-2. It detects the Dockerfile. Add a **Volume** mounted at `/app/data`.
-3. Variables: set `XAI_API_KEY` and `AUTH_SECRET` (generate with
-   `openssl rand -base64 32`). Optionally `XAI_MODEL=grok-3`.
-4. Deploy. Railway gives you a public URL.
-
----
-
-## Option C — Fly.io
-1. `fly launch` (uses the Dockerfile). Decline the managed Postgres prompt.
-2. Create a volume: `fly volumes create brutha_data --size 5`.
-3. In `fly.toml`, mount it:
-   ```toml
-   [mounts]
-     source = "brutha_data"
-     destination = "/app/data"
+1. Create a project at [supabase.com](https://supabase.com).
+2. Apply the schema. Either:
+   - **SQL Editor**: paste `supabase/APPLY_ALL.sql` and Run, **or**
+   - **CLI**: `supabase link --project-ref <ref>` then `supabase db push`.
+3. Store the service-role key in Vault so the worker-dispatch trigger can call
+   the Edge Function (run once, in the SQL Editor):
+   ```sql
+   select vault.create_secret('<service-role-key>', 'service_role_key');
    ```
-4. Secrets: `fly secrets set XAI_API_KEY=... AUTH_SECRET=$(openssl rand -base64 32)`.
-5. `fly deploy`.
+   > If you fork onto a different project, also update the hardcoded `edge_url`
+   > in `public.dispatch_worker()` (migration 2) to your project URL.
+4. Deploy the background-worker Edge Function and give it your Puter token:
+   ```bash
+   supabase functions deploy run-worker
+   supabase secrets set PUTER_AUTH_TOKEN=***   # XAI_MODEL optional (x-ai/grok-4-1-fast)
+   ```
+   (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.)
 
----
+## 2. Configure the app environment
 
-## Option D — Any VM / Docker host (most control)
-```bash
-# On the server, with the repo checked out:
-export XAI_API_KEY=your-key
-docker compose up -d --build       # uses docker-compose.yml (named volume brutha-data)
-```
-`docker-compose.yml` already mounts a persistent volume at `/app/data`.
+Copy `.env.example` to `.env.local` (local) or set these in your host's
+dashboard. The first four are **required**:
 
----
+| Var                              | Required | Notes                                              |
+|----------------------------------|----------|----------------------------------------------------|
+| `PUTER_AUTH_TOKEN`               | ✅       | Puter token — powers Grok inference (the agent won't run without it) |
+| `NEXT_PUBLIC_SUPABASE_URL`       | ✅       | Project URL (Settings → API)                       |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | ✅       | Public anon/publishable key (RLS protects data)    |
+| `SUPABASE_SERVICE_ROLE_KEY`      | ✅       | **Server-only**, bypasses RLS — never expose       |
+| `NEXT_PUBLIC_AUTH_PROVIDERS`     | ⬜       | e.g. `github,google` to show OAuth buttons         |
+| `XAI_MODEL`                      | ⬜       | Grok model via Puter; defaults to `x-ai/grok-4-1-fast` |
+| `XAI_API_KEY`                    | ⬜       | Only needed to enable the image-generation tool    |
+| `SMTP_*`                         | ⬜       | enables the email-sending tool                     |
 
-## Required environment variables (all platforms)
-| Var            | Required | Notes |
-|----------------|----------|-------|
-| `XAI_API_KEY`  | ✅       | xAI key — the agent won't run without it |
-| `AUTH_SECRET`  | ✅       | `openssl rand -base64 32` (Render auto-generates) |
-| `AUTH_TRUST_HOST` | ✅ on most PaaS | set `true` so Auth.js trusts the proxy host |
-| `XAI_MODEL`    | ⬜       | defaults to `grok-3` |
-| `AUTH_URL`     | ⬜       | pin to your deploy URL if OAuth redirects misbehave |
-| `AUTH_GITHUB_ID/SECRET`, `AUTH_GOOGLE_ID/SECRET` | ⬜ | enable OAuth; otherwise email/password works |
-| `SMTP_*`       | ⬜       | enable the email-sending tool |
+> `.env.local` is gitignored and is **NOT** uploaded to any platform. Every var
+> above must be set in the platform's dashboard/secrets.
 
-> Local `.env.local` is gitignored and is **NOT** uploaded to any platform.
-> Every var above must be set in the platform's dashboard/secrets.
+## 3. Deploy the Next.js app
+
+The app is a standard Next.js 16 server with no persistent-disk requirement.
+
+- **Vercel / Netlify**: import the repo, set the env vars above, deploy.
+- **Render / Railway / Fly / Docker**: the included `Dockerfile` and
+  `docker-compose.yml` still work; no volume is needed anymore.
+
+### Supabase Auth redirect URLs
+
+In Supabase → Authentication → URL Configuration, set:
+- **Site URL**: your deployed origin (e.g. `https://brutha.example.com`)
+- **Redirect URLs**: add `<origin>/auth/callback`
+
+For OAuth, enable the provider in the Supabase dashboard and set
+`NEXT_PUBLIC_AUTH_PROVIDERS` so the buttons appear.
 
 ## Verifying a deploy
+
+Sign in (email/password auto-creates an account), then:
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://YOUR_URL/api/workers
-# expect 200 with {"workers":[]}  (NOT 500)
-curl -s https://YOUR_URL/api/settings/email
-# expect 200 JSON
+# While signed in (cookies), the workers API returns the user's list:
+curl -s https://YOUR_URL/api/workers          # expect {"workers":[]} for a new user
 ```
-If these are 200, the persistent-disk + env-var setup is correct.
+Ask BRUTHA to "save a note", then "search my notes" — data round-trips through
+Supabase Postgres under Row Level Security. Ask it to do something "in the
+background" to enqueue a worker; the `run-worker` Edge Function executes it and
+the Workers panel updates live via Realtime.

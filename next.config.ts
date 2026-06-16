@@ -12,13 +12,29 @@ import type { NextConfig } from "next";
  */
 const isDev = process.env.NODE_ENV !== "production";
 
+// Supabase project origin (for connect-src: REST, Realtime WS, Storage). Falls
+// back to allowing all https/wss if not set at build time so the app still works.
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseOrigin = (() => {
+  try {
+    return supabaseUrl ? new URL(supabaseUrl).origin : "";
+  } catch {
+    return "";
+  }
+})();
+const supabaseWs = supabaseOrigin.replace(/^http/, "ws");
+const connectSrc = ["'self'", supabaseOrigin, supabaseWs]
+  .filter(Boolean)
+  .join(" ");
+
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  // Allow images served from Supabase Storage signed URLs.
+  `img-src 'self' data: blob: ${supabaseOrigin}`.trim(),
   "font-src 'self' data:",
-  "connect-src 'self'",
+  `connect-src ${connectSrc}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -37,12 +53,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Produce a standalone server bundle for small Docker images (S17).
-  output: "standalone",
-
-  // Native / server-only modules must not be bundled by Turbopack; keep them
-  // external so they load via Node's require at runtime.
-  serverExternalPackages: ["better-sqlite3", "nodemailer"],
+  // Native / server-only modules must not be bundled; keep them external so they
+  // load via Node's require at runtime.
+  serverExternalPackages: ["nodemailer"],
 
   async headers() {
     return [

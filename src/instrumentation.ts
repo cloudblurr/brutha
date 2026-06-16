@@ -1,19 +1,17 @@
 /**
  * Next.js instrumentation hook — runs once when the server process starts.
  *
- * We use it to resume BRUTHA Workers that were interrupted by a restart: any
- * job left 'running'/'queued' in the DB is re-queued and re-executed so
- * background work isn't silently lost across deploys/crashes.
+ * Background workers are now Supabase-native: a row inserted into public.workers
+ * with status 'queued' fires a Postgres trigger (workers_dispatch) that invokes
+ * the run-worker Edge Function over HTTP. Worker execution therefore lives in
+ * Supabase, not in this Next.js process, so there is nothing to resume on boot —
+ * a 'queued' row is picked up by the function independently of server restarts.
  *
- * Guarded to the Node.js server runtime (not edge) since it touches SQLite.
+ * The hook is kept (Next calls it automatically) as the place to wire future
+ * server-start side effects.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  try {
-    const { resumeOrphanedWorkers } = await import("./lib/workers");
-    const n = resumeOrphanedWorkers();
-    if (n > 0) console.log(`[workers] resumed ${n} orphaned worker(s) on boot`);
-  } catch (e) {
-    console.error("[workers] failed to resume orphaned workers:", e);
-  }
+  // No-op: worker dispatch/resume is handled by Supabase (DB trigger ->
+  // run-worker Edge Function). See supabase/migrations + supabase/functions.
 }

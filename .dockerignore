@@ -3,7 +3,7 @@ node_modules
 .next
 .git
 .github
-data
+supabase
 *.md
 .env*
 !.env.example

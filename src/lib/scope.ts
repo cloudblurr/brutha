@@ -1,48 +1,58 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "./supabase/database.types";
 
 /**
- * Request-scoped user context.
+ * Request-scoped Supabase context.
  *
- * Tools (contacts, notes, tasks, workers) need to know *which user* is making
- * the request so they can read/write only that user's data. The AI SDK's
- * tool `execute` functions don't receive a user id, and threading one through
- * every signature would be invasive and error-prone.
+ * Tools (contacts, notes, tasks) need a Supabase client that acts as the
+ * current user so Row Level Security scopes every query to that user's data.
+ * The AI SDK's tool `execute` functions don't receive a client, and threading
+ * one through every signature would be invasive.
  *
- * Instead we stash the current scope in an AsyncLocalStorage store at the
- * request boundary (the chat / workers / settings routes call
- * `runWithScope(scope, fn)`), and any tool reads it back via `currentScope()`.
- * AsyncLocalStorage propagates across awaits within the same async context, so
- * the value is correct even through the agent's async tool loop.
+ * Instead we stash an RLS-scoped Supabase client in AsyncLocalStorage at the
+ * request boundary (the chat route, or the worker Edge Function for background
+ * jobs), and any tool reads it back via `currentDb()`. AsyncLocalStorage
+ * propagates across awaits, so the value is correct through the agent's async
+ * tool loop.
  *
- * The scope value is the signed-in user's id, or the string "global" for the
- * pre-auth / unauthenticated single-operator fallback. Using "global" as the
- * default keeps all existing behaviour and data intact when no user is signed
- * in.
+ * This replaces the old text "scope" string: RLS now enforces ownership, so the
+ * client itself *is* the scope.
  */
 
-export const GLOBAL_SCOPE = "global";
+export type Db = SupabaseClient<Database>;
 
 interface ScopeStore {
-  scope: string;
+  db: Db;
+  userId: string;
 }
 
 const storage = new AsyncLocalStorage<ScopeStore>();
 
 /**
- * Run `fn` with the given user scope bound to the async context. Everything
- * awaited inside `fn` (including agent tool calls) sees this scope.
+ * Run `fn` with the given RLS-scoped Supabase client + user id bound to the
+ * async context. Everything awaited inside (including agent tool calls) sees it.
  */
-export function runWithScope<T>(scope: string | null | undefined, fn: () => T): T {
-  return storage.run({ scope: normalizeScope(scope) }, fn);
+export function runWithDb<T>(db: Db, userId: string, fn: () => T): T {
+  return storage.run({ db, userId }, fn);
 }
 
-/** The current request's user scope, or "global" when none is bound. */
-export function currentScope(): string {
-  return storage.getStore()?.scope ?? GLOBAL_SCOPE;
+/**
+ * The current request's RLS-scoped Supabase client. Throws if called outside a
+ * `runWithDb(...)` context — a programming error, since every tool invocation
+ * is wrapped at the request boundary.
+ */
+export function currentDb(): Db {
+  const store = storage.getStore();
+  if (!store) {
+    throw new Error(
+      "No Supabase context bound. A tool ran outside runWithDb() — wrap the agent call at the request boundary."
+    );
+  }
+  return store.db;
 }
 
-/** Normalize a possibly-empty scope to a safe non-empty value. */
-export function normalizeScope(scope: string | null | undefined): string {
-  const s = (scope ?? "").trim();
-  return s || GLOBAL_SCOPE;
+/** The current user's id, or null when no context is bound. */
+export function currentUserId(): string | null {
+  return storage.getStore()?.userId ?? null;
 }

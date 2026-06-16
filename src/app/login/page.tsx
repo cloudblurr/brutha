@@ -1,22 +1,22 @@
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { LoginForm } from "./LoginForm";
 
 /**
- * Dedicated sign-in page (Auth.js `pages.signIn` points here).
+ * Dedicated sign-in page.
  *
- * Server component: if the user already has a session, bounce them to the app.
- * Otherwise render the client-side LoginForm. The optional `callbackUrl` query
- * param is forwarded so users return to where they were headed.
+ * Server component: if the user already has a Supabase session, bounce them to
+ * the app. Otherwise render the client-side LoginForm. The optional
+ * `redirectTo` query param is forwarded so users return where they were headed.
  */
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{ redirectTo?: string; error?: string }>;
 }) {
-  const session = await auth();
-  const { callbackUrl, error } = await searchParams;
-  if (session?.user) redirect(callbackUrl || "/");
+  const user = await getCurrentUser();
+  const { redirectTo, error } = await searchParams;
+  if (user) redirect(redirectTo || "/");
 
   return (
     <main className="grid min-h-dvh place-items-center px-4">
@@ -28,7 +28,7 @@ export default async function LoginPage({
             Your agent, your data — kept separate per account.
           </p>
         </div>
-        <LoginForm callbackUrl={callbackUrl} initialError={error} />
+        <LoginForm redirectTo={redirectTo} initialError={error} />
       </div>
     </main>
   );
