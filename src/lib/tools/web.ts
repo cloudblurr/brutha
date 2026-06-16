@@ -385,4 +385,57 @@ export const webTools = {
       }
     },
   }),
+
+  compareTopics: tool({
+    description:
+      "Research-synthesis meta-tool: fetch Wikipedia summaries for 2-4 topics and return a structured side-by-side comparison (extract + length + link per topic). Use for quick market/competitor/concept research instead of calling wikipedia repeatedly.",
+    inputSchema: z.object({
+      topics: z.array(z.string().min(1)).min(2).max(4),
+    }),
+    execute: async ({ topics }) => {
+      // De-dupe while preserving order.
+      const unique = Array.from(new Set(topics.map((t) => t.trim()))).filter(Boolean);
+      const results = await Promise.all(
+        unique.map(async (topic) => {
+          try {
+            return await cached(
+              `wikipedia:${topic.toLowerCase()}`,
+              async () => {
+                const data = await getJson(
+                  `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+                    topic.replace(/\s+/g, "_")
+                  )}`
+                );
+                if (!data?.extract) {
+                  return { topic, found: false as const, note: "No summary found." };
+                }
+                const extract: string = data.extract;
+                return {
+                  topic,
+                  found: true as const,
+                  title: data.title,
+                  summary: extract.length > 600 ? extract.slice(0, 600) + "…" : extract,
+                  summaryLength: extract.length,
+                  url: data?.content_urls?.desktop?.page,
+                };
+              },
+              TTL.static
+            );
+          } catch (e) {
+            return { topic, found: false as const, note: errMsg(e) };
+          }
+        })
+      );
+      const found = results.filter((r) => r.found).length;
+      return {
+        requested: unique.length,
+        found,
+        comparison: results,
+        note:
+          found < unique.length
+            ? "Some topics had no Wikipedia summary; report those gaps to the user."
+            : undefined,
+      };
+    },
+  }),
 };

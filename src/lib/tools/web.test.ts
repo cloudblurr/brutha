@@ -79,4 +79,51 @@ describe("web tools fetch hardening", () => {
     await exec(webTools.wikipedia)({ topic: "Test" }, OPTS);
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it("compareTopics returns a structured side-by-side for multiple topics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        const title = decodeURIComponent(url.split("/summary/")[1] ?? "X");
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              title,
+              extract: `Summary of ${title}.`,
+              content_urls: { desktop: { page: `https://en.wikipedia.org/wiki/${title}` } },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        );
+      })
+    );
+
+    const res = (await exec(webTools.compareTopics)(
+      { topics: ["Stripe", "Adyen"] },
+      OPTS
+    )) as {
+      requested: number;
+      found: number;
+      comparison: { topic: string; found: boolean; summary?: string }[];
+    };
+    expect(res.requested).toBe(2);
+    expect(res.found).toBe(2);
+    expect(res.comparison.map((c) => c.topic)).toEqual(["Stripe", "Adyen"]);
+    expect(res.comparison[0].summary).toContain("Summary of");
+  });
+
+  it("compareTopics flags topics with no summary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }))
+      )
+    );
+    const res = (await exec(webTools.compareTopics)(
+      { topics: ["Nonexistent A", "Nonexistent B"] },
+      OPTS
+    )) as { found: number; note?: string };
+    expect(res.found).toBe(0);
+    expect(res.note).toBeTruthy();
+  });
 });

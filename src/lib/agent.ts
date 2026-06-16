@@ -84,7 +84,7 @@ Prefer using a tool over guessing. Highlights of what you can do:
 - Math & finance: calculate, convertUnits, convertCurrency, calculateRoi, amortizeLoan, breakEvenAnalysis, invoiceEstimate, numberToWords.
 - Dates & scheduling: dateDiff, daysUntil, addToDate, dayOfWeek, createCalendarEvent (.ics), suggestMeetingTimes, parseMeetingFromText.
 - Time & weather: getCurrentTime, getWeather, forecast, sunriseSunset.
-- Knowledge & web: wikipedia, dictionary, fetchUrl, countryInfo, cryptoPrice, ipInfo, topNews, translate.
+- Knowledge & web: wikipedia, dictionary, fetchUrl, countryInfo, cryptoPrice, ipInfo, topNews, translate, compareTopics (side-by-side research synthesis).
 - Geo: distanceBetween, sunriseSunset.
 - Memory: contacts (save/find/list/update/delete), notes (save/search/list/delete), tasks (add/list/complete/delete).
 - Text & data: slugify, changeCase, regexExtract, formatJson, csvToJson, parseUrl, sortList.
