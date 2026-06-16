@@ -206,10 +206,12 @@ npm run test:watch  # watch mode
 npm run test:coverage
 ```
 
-Tests live next to the code (`src/**/*.test.ts`) and under `tests/`. They cover
-the tool error helpers, the LRU cache's single-flight behavior, env validation,
-the tool registry/manifest, i18n, and the `/api/chat` route's validation
-branches (no live model call required).
+Tests live next to the code (`src/**/*.test.ts`) and under `tests/`, and all run
+through a single Vitest invocation (`npm test`). They cover the tool error
+helpers, the LRU cache's single-flight behavior, env validation, the tool
+registry/manifest, i18n, the web tools' fetch timeout/error hardening, password
+hashing, per-user scope (AsyncLocalStorage), upload validation, and the
+`/api/chat` route's validation branches (no live model call required).
 
 ## Tool discovery
 
@@ -261,7 +263,7 @@ The model will automatically discover and call it when relevant.
 | `SMTP_USER`    | _(none)_     | Optional. SMTP username / email.     |
 | `SMTP_PASS`    | _(none)_     | Optional. SMTP / app password.       |
 | `SMTP_FROM`    | `SMTP_USER`  | Optional. From address.              |
-| `TEST_EMAIL_TO`| `dev00engine@blurr.cloud` | Default recipient when `sendEmail` is called without a `to`. |
+| `TEST_EMAIL_TO`| `you@example.com` | Default recipient when `sendEmail` is called without a `to`. |
 
 > **Email is optional.** Without SMTP vars, the `sendEmail` tool simply
 > reports that email is not configured — the rest of the agent works fine.
