@@ -295,6 +295,17 @@ and reference it by key, no code change.
 - `GET /api/health` returns a structured health map (env, SQLite, Temporal, and
   pings of two critical external APIs). Returns `200` for `ok`/`degraded` and
   `503` when a critical dependency is down — suitable for a load-balancer probe.
+  It also embeds a `cache` block (size, hit/miss counts, hit-rate) and a
+  `metrics` block of in-process counters so live operational signals are
+  observable without scraping logs.
+- The tool cache uses per-data-type TTLs (`TTL` presets in `lib/tools/_cache.ts`):
+  `realtime` (~1 min: crypto, news), `live`/`page` (~5 min: weather, currency,
+  fetched pages), and `static` (~24h: dictionary, country, Wikipedia, IP info).
+  Live data expires fast; stable reference data is cached long.
+- The Temporal → streaming fallback is no longer silent: when durable execution
+  is unreachable it increments a `temporal.fallback_to_streaming` counter
+  (surfaced in `/api/health` → `metrics`) in addition to logging, so a degraded
+  Temporal connection is visible operationally.
 - External tool calls are wrapped with retry + exponential backoff and per-call
   timeouts; 4xx responses are not retried.
 - `fetchUrl` is SSRF-guarded: only public `http(s)` URLs are allowed; private,

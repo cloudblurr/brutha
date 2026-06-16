@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { cached } from "./_cache";
+import { cached, TTL } from "./_cache";
 import { assertPublicUrl, BlockedUrlError } from "./_ssrf";
 import { withRetry } from "./_reliability";
 
@@ -53,7 +53,7 @@ export const webTools = {
     inputSchema: z.object({ location: z.string() }),
     execute: async ({ location }) => {
       try {
-        // S7: cache + single-flight identical weather lookups for 5 min.
+        // S7: cache + single-flight identical weather lookups (~5 min).
         return await cached(`weather:${location.toLowerCase().trim()}`, async () => {
           const geo = await getJson(
             `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
@@ -89,26 +89,33 @@ export const webTools = {
     }),
     execute: async ({ location, days }) => {
       try {
-        const geo = await getJson(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
-            location
-          )}&count=1`
+        const key = `forecast:${location.toLowerCase().trim()}:${days ?? 5}`;
+        return await cached(
+          key,
+          async () => {
+            const geo = await getJson(
+              `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+                location
+              )}&count=1`
+            );
+            const place = geo?.results?.[0];
+            if (!place) return { error: `Could not find location: ${location}` };
+            const wx = await getJson(
+              `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&forecast_days=${days ?? 5}&timezone=auto`
+            );
+            const d = wx?.daily;
+            if (!d) return { error: "Forecast unavailable." };
+            const out = d.time.map((date: string, i: number) => ({
+              date,
+              maxC: d.temperature_2m_max[i],
+              minC: d.temperature_2m_min[i],
+              precipProbPct: d.precipitation_probability_max?.[i],
+              weatherCode: d.weather_code[i],
+            }));
+            return { location: `${place.name}, ${place.country ?? ""}`.trim(), forecast: out };
+          },
+          TTL.live
         );
-        const place = geo?.results?.[0];
-        if (!place) return { error: `Could not find location: ${location}` };
-        const wx = await getJson(
-          `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code&forecast_days=${days ?? 5}&timezone=auto`
-        );
-        const d = wx?.daily;
-        if (!d) return { error: "Forecast unavailable." };
-        const out = d.time.map((date: string, i: number) => ({
-          date,
-          maxC: d.temperature_2m_max[i],
-          minC: d.temperature_2m_min[i],
-          precipProbPct: d.precipitation_probability_max?.[i],
-          weatherCode: d.weather_code[i],
-        }));
-        return { location: `${place.name}, ${place.country ?? ""}`.trim(), forecast: out };
       } catch (e) {
         return { error: `Failed to fetch forecast: ${errMsg(e)}` };
       }
@@ -124,7 +131,7 @@ export const webTools = {
         // SSRF guard: reject private/loopback/link-local/metadata targets
         // (incl. hostnames that resolve to internal IPs) before fetching.
         await assertPublicUrl(url);
-        // S7: cache + single-flight identical URL fetches for 5 min.
+        // S7: cache + single-flight identical URL fetches (~5 min).
         return await cached(`fetchUrl:${url}`, async () => {
           const res = await fetch(url, {
             headers: { "User-Agent": "GrokAgent/1.0" },
@@ -172,18 +179,24 @@ export const webTools = {
     inputSchema: z.object({ topic: z.string() }),
     execute: async ({ topic }) => {
       try {
-        const data = await getJson(
-          `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
-            topic.replace(/\s+/g, "_")
-          )}`
+        return await cached(
+          `wikipedia:${topic.toLowerCase().trim()}`,
+          async () => {
+            const data = await getJson(
+              `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+                topic.replace(/\s+/g, "_")
+              )}`
+            );
+            if (data?.type === "disambiguation")
+              return { topic, note: "Disambiguation page", extract: data.extract };
+            return {
+              title: data.title,
+              extract: data.extract,
+              url: data?.content_urls?.desktop?.page,
+            };
+          },
+          TTL.static
         );
-        if (data?.type === "disambiguation")
-          return { topic, note: "Disambiguation page", extract: data.extract };
-        return {
-          title: data.title,
-          extract: data.extract,
-          url: data?.content_urls?.desktop?.page,
-        };
       } catch (e) {
         return { error: `Wikipedia lookup failed: ${errMsg(e)}` };
       }
@@ -195,16 +208,22 @@ export const webTools = {
     inputSchema: z.object({ word: z.string() }),
     execute: async ({ word }) => {
       try {
-        const data = await getJson(
-          `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`
+        return await cached(
+          `dictionary:${word.toLowerCase().trim()}`,
+          async () => {
+            const data = await getJson(
+              `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`
+            );
+            const entry = Array.isArray(data) ? data[0] : null;
+            if (!entry) return { error: `No definition found for '${word}'.` };
+            const meanings = entry.meanings?.slice(0, 3).map((m: { partOfSpeech: string; definitions: { definition: string }[] }) => ({
+              partOfSpeech: m.partOfSpeech,
+              definition: m.definitions?.[0]?.definition,
+            }));
+            return { word: entry.word, phonetic: entry.phonetic, meanings };
+          },
+          TTL.static
         );
-        const entry = Array.isArray(data) ? data[0] : null;
-        if (!entry) return { error: `No definition found for '${word}'.` };
-        const meanings = entry.meanings?.slice(0, 3).map((m: { partOfSpeech: string; definitions: { definition: string }[] }) => ({
-          partOfSpeech: m.partOfSpeech,
-          definition: m.definitions?.[0]?.definition,
-        }));
-        return { word: entry.word, phonetic: entry.phonetic, meanings };
       } catch (e) {
         return { error: `Dictionary lookup failed for '${word}': ${errMsg(e)}` };
       }
@@ -221,13 +240,21 @@ export const webTools = {
     }),
     execute: async ({ amount, from, to }) => {
       try {
-        const data = await getJson(
-          `https://api.frankfurter.app/latest?amount=${amount}&from=${from.toUpperCase()}&to=${to.toUpperCase()}`
+        const f = from.toUpperCase();
+        const t = to.toUpperCase();
+        return await cached(
+          `currency:${amount}:${f}:${t}`,
+          async () => {
+            const data = await getJson(
+              `https://api.frankfurter.app/latest?amount=${amount}&from=${f}&to=${t}`
+            );
+            const result = data?.rates?.[t];
+            if (result === undefined)
+              return { error: `Could not convert ${from} to ${to}.` };
+            return { amount, from: f, to: t, result, date: data.date };
+          },
+          TTL.live
         );
-        const result = data?.rates?.[to.toUpperCase()];
-        if (result === undefined)
-          return { error: `Could not convert ${from} to ${to}.` };
-        return { amount, from: from.toUpperCase(), to: to.toUpperCase(), result, date: data.date };
       } catch (e) {
         return { error: `Currency conversion failed: ${errMsg(e)}` };
       }
@@ -244,12 +271,18 @@ export const webTools = {
       try {
         const cur = (currency ?? "usd").toLowerCase();
         const id = coin.toLowerCase().replace(/\s+/g, "-");
-        const data = await getJson(
-          `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=${cur}`
+        return await cached(
+          `crypto:${id}:${cur}`,
+          async () => {
+            const data = await getJson(
+              `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=${cur}`
+            );
+            const price = data?.[id]?.[cur];
+            if (price === undefined) return { error: `Unknown coin '${coin}'.` };
+            return { coin: id, currency: cur, price };
+          },
+          TTL.realtime
         );
-        const price = data?.[id]?.[cur];
-        if (price === undefined) return { error: `Unknown coin '${coin}'.` };
-        return { coin: id, currency: cur, price };
       } catch (e) {
         return { error: `Crypto price lookup failed: ${errMsg(e)}` };
       }
@@ -261,19 +294,25 @@ export const webTools = {
     inputSchema: z.object({ ip: z.string().optional() }),
     execute: async ({ ip }) => {
       try {
-        const data = await getJson(`http://ip-api.com/json/${ip ?? ""}`);
-        if (data?.status !== "success")
-          return { error: data?.message ?? "Lookup failed." };
-        return {
-          ip: data.query,
-          city: data.city,
-          region: data.regionName,
-          country: data.country,
-          isp: data.isp,
-          lat: data.lat,
-          lon: data.lon,
-          timezone: data.timezone,
-        };
+        return await cached(
+          `ipinfo:${ip ?? "self"}`,
+          async () => {
+            const data = await getJson(`http://ip-api.com/json/${ip ?? ""}`);
+            if (data?.status !== "success")
+              return { error: data?.message ?? "Lookup failed." };
+            return {
+              ip: data.query,
+              city: data.city,
+              region: data.regionName,
+              country: data.country,
+              isp: data.isp,
+              lat: data.lat,
+              lon: data.lon,
+              timezone: data.timezone,
+            };
+          },
+          TTL.static
+        );
       } catch (e) {
         return { error: `IP lookup failed: ${errMsg(e)}` };
       }
@@ -285,20 +324,26 @@ export const webTools = {
     inputSchema: z.object({ country: z.string() }),
     execute: async ({ country }) => {
       try {
-        const data = await getJson(
-          `https://restcountries.com/v3.1/name/${encodeURIComponent(country)}?fields=name,capital,population,region,currencies,languages,flag`
+        return await cached(
+          `country:${country.toLowerCase().trim()}`,
+          async () => {
+            const data = await getJson(
+              `https://restcountries.com/v3.1/name/${encodeURIComponent(country)}?fields=name,capital,population,region,currencies,languages,flag`
+            );
+            const c = Array.isArray(data) ? data[0] : null;
+            if (!c) return { error: `Country not found: ${country}` };
+            return {
+              name: c.name?.common,
+              capital: c.capital?.[0],
+              region: c.region,
+              population: c.population,
+              currencies: c.currencies ? Object.keys(c.currencies) : [],
+              languages: c.languages ? Object.values(c.languages) : [],
+              flag: c.flag,
+            };
+          },
+          TTL.static
         );
-        const c = Array.isArray(data) ? data[0] : null;
-        if (!c) return { error: `Country not found: ${country}` };
-        return {
-          name: c.name?.common,
-          capital: c.capital?.[0],
-          region: c.region,
-          population: c.population,
-          currencies: c.currencies ? Object.keys(c.currencies) : [],
-          languages: c.languages ? Object.values(c.languages) : [],
-          flag: c.flag,
-        };
       } catch (e) {
         return { error: `Country lookup failed: ${errMsg(e)}` };
       }
@@ -312,22 +357,29 @@ export const webTools = {
     }),
     execute: async ({ count }) => {
       try {
-        const ids: number[] = await getJson(
-          "https://hacker-news.firebaseio.com/v0/topstories.json"
+        const n = count ?? 8;
+        return await cached(
+          `topnews:${n}`,
+          async () => {
+            const ids: number[] = await getJson(
+              "https://hacker-news.firebaseio.com/v0/topstories.json"
+            );
+            const top = ids.slice(0, n);
+            const stories = await Promise.all(
+              top.map((id) =>
+                getJson(`https://hacker-news.firebaseio.com/v0/item/${id}.json`)
+              )
+            );
+            return {
+              headlines: stories.map((s) => ({
+                title: s.title,
+                url: s.url ?? `https://news.ycombinator.com/item?id=${s.id}`,
+                score: s.score,
+              })),
+            };
+          },
+          TTL.realtime
         );
-        const top = ids.slice(0, count ?? 8);
-        const stories = await Promise.all(
-          top.map((id) =>
-            getJson(`https://hacker-news.firebaseio.com/v0/item/${id}.json`)
-          )
-        );
-        return {
-          headlines: stories.map((s) => ({
-            title: s.title,
-            url: s.url ?? `https://news.ycombinator.com/item?id=${s.id}`,
-            score: s.score,
-          })),
-        };
       } catch (e) {
         return { error: `News fetch failed: ${errMsg(e)}` };
       }

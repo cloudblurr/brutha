@@ -10,6 +10,7 @@ import { getEnvError } from "@/lib/env";
 import { logger, newRequestId } from "@/lib/logger";
 import { resolveRequestScope } from "@/lib/request-scope";
 import { runWithScope } from "@/lib/scope";
+import { increment, Metric } from "@/lib/metrics";
 
 // Stream responses; this route runs on the Node.js runtime (required for
 // better-sqlite3 and nodemailer).
@@ -19,6 +20,7 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const requestId = newRequestId();
   const startedAt = Date.now();
+  increment(Metric.chatRequests);
 
   // S5: validate environment up front; fail fast with a clear message.
   const envError = getEnvError();
@@ -65,6 +67,7 @@ export async function POST(req: Request) {
   if (isTemporalEnabled()) {
     try {
       const result = await runDurableAgent(modelMessages);
+      increment(Metric.temporalDurableOk);
       logger.info(
         { requestId, workflowId: result.workflowId, ms: Date.now() - startedAt },
         "durable run ok"
@@ -82,7 +85,9 @@ export async function POST(req: Request) {
       );
     } catch (err) {
       // Fall through to streaming mode if Temporal is misconfigured/unreachable
-      // so the chat keeps working instead of hard-failing.
+      // so the chat keeps working instead of hard-failing. Count it so the
+      // silent fallback is observable via /api/health (not just logs).
+      increment(Metric.temporalFallback);
       logger.error(
         {
           requestId,

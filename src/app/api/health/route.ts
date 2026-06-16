@@ -2,6 +2,8 @@ import { getDb } from "@/lib/db";
 import { isTemporalEnabled } from "@/lib/temporal/run";
 import { getEnvError } from "@/lib/env";
 import { withTimeout } from "@/lib/tools/_reliability";
+import { cacheStats } from "@/lib/tools/_cache";
+import { snapshotMetrics } from "@/lib/metrics";
 
 export const runtime = "nodejs";
 // Always evaluate fresh; never cache a health probe.
@@ -114,7 +116,17 @@ export async function GET() {
       : "ok";
 
   return new Response(
-    JSON.stringify({ status, time: new Date().toISOString(), checks }, null, 2),
+    JSON.stringify(
+      {
+        status,
+        time: new Date().toISOString(),
+        checks,
+        cache: cacheStats(),
+        metrics: snapshotMetrics(),
+      },
+      null,
+      2
+    ),
     {
       status: status === "error" ? 503 : 200,
       headers: { "content-type": "application/json", "cache-control": "no-store" },
