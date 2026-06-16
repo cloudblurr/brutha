@@ -256,8 +256,17 @@ The model will automatically discover and call it when relevant.
 
 | Env var        | Default      | Description                          |
 | -------------- | ------------ | ------------------------------------ |
-| `XAI_API_KEY`  | _(none)_     | Required. Your xAI API key.          |
+| `XAI_API_KEY`  | _(none)_     | Required (xai provider). Your xAI API key. |
 | `XAI_MODEL`    | `grok-3`     | Optional. Grok model to use.         |
+| `AGENT_PROVIDER` | `xai`      | Optional. `xai` or `openai-compatible`. |
+| `AGENT_BASE_URL` | _(none)_   | OpenAI-compatible endpoint (required when `AGENT_PROVIDER=openai-compatible`). |
+| `AGENT_API_KEY`  | _(XAI_API_KEY)_ | API key for the OpenAI-compatible endpoint. |
+| `AGENT_MODEL`    | _(XAI_MODEL)_ | Model id for the active provider.  |
+| `AGENT_TEMPERATURE` | `0.2`   | Sampling temperature.                |
+| `AGENT_MAX_STEPS`   | `14`    | Hard cap on model↔tool steps.        |
+| `AGENT_STEP_WARN`   | `maxSteps-4` | Step at which the agent is nudged to consolidate. |
+| `AGENT_PERSONA`     | `general` | Persona overlay: `general`/`legal`/`finance`/`ops`. |
+| `ADMIN_SECRET`      | _(none)_ | Gates `/admin/tools` + `/api/tools` when set (header `x-admin-secret` or `?admin_key=`). |
 | `SMTP_HOST`    | _(none)_     | Optional. SMTP server for `sendEmail`. |
 | `SMTP_PORT`    | _(none)_     | Optional. 465 (SSL) or 587 (STARTTLS). |
 | `SMTP_USER`    | _(none)_     | Optional. SMTP username / email.     |
@@ -265,10 +274,96 @@ The model will automatically discover and call it when relevant.
 | `SMTP_FROM`    | `SMTP_USER`  | Optional. From address.              |
 | `TEST_EMAIL_TO`| `you@example.com` | Default recipient when `sendEmail` is called without a `to`. |
 
+### Model providers
+
+BRUTHA is not hardwired to xAI. Set `AGENT_PROVIDER=openai-compatible` with
+`AGENT_BASE_URL` (and optionally `AGENT_API_KEY`) to route the agent through any
+OpenAI-compatible endpoint (a gateway, a self-hosted vLLM/Ollama, OpenAI, etc.)
+without code changes. Leaving `AGENT_PROVIDER` unset keeps the default xAI/Grok
+path, so existing deployments need change nothing.
+
+### Personas
+
+`AGENT_PERSONA` layers a short overlay on top of the base system prompt so the
+same agent can be re-skinned for a business context: `legal` (cautious, numbered
+clauses), `finance` (precise, tabular), `ops` (action-oriented checklists), or
+`general` (default). Personas live in `locales/personas/personas.json` — add one
+and reference it by key, no code change.
+
+### Health & reliability
+
+- `GET /api/health` returns a structured health map (env, SQLite, Temporal, and
+  pings of two critical external APIs) plus a `cache` hit/miss snapshot and
+  in-process `metrics` counters. Returns `200` for `ok`/`degraded` and `503`
+  when a critical dependency is down — suitable for a load-balancer probe.
+- External tool calls are wrapped with retry + exponential backoff and per-call
+  timeouts; 4xx responses are not retried.
+- Tool results are cached with **per-data-type TTLs** (`TTL` presets in
+  `lib/tools/_cache.ts`): real-time data (crypto, news) ~1 min, live data
+  (weather, currency, fetched pages) ~5 min, and stable reference data
+  (dictionary, country, Wikipedia, IP info) ~24h. Concurrent identical calls
+  share one in-flight request (single-flight).
+- Temporal's silent fallback to streaming is **counted**
+  (`temporal.fallback_to_streaming` in `/api/health` → `metrics`) as well as
+  logged, so degraded durable execution is observable in production.
+- `fetchUrl` is SSRF-guarded: only public `http(s)` URLs are allowed; private,
+  loopback, link-local, and cloud-metadata targets (including hostnames that
+  resolve to them) are rejected, and redirects are not auto-followed.
+- The agent signals `hitStepLimit` when it stops at the hard step cap so callers
+  (and background workers) can flag a potentially truncated answer.
+
+
+
 > **Email is optional.** Without SMTP vars, the `sendEmail` tool simply
 > reports that email is not configured — the rest of the agent works fine.
 > For Gmail, use an [app password](https://myaccount.google.com/apppasswords),
 > not your account password.
+
+## Install on your phone (PWA) + push notifications
+
+BRUTHA is an installable **Progressive Web App**, so it runs as a real app on
+**Android and iOS** with no app store, and can send **Web Push** notifications
+(reminders, background-worker completion, alerts) even when it isn't open.
+
+**Install**
+
+- **Android (Chrome):** open the site → menu → *Install app* / *Add to Home
+  Screen*. It launches full-screen from your home screen.
+- **iOS (Safari 16.4+):** open the site → Share → *Add to Home Screen*. iOS only
+  permits Web Push for apps installed to the Home Screen, so install first, then
+  enable notifications from inside the app.
+
+The app shell is cached by a service worker (`public/sw.js`), so it opens
+offline and shows a friendly `/offline` page when there's no network.
+
+**Enable push notifications (optional, zero dependencies)**
+
+Push uses the standard VAPID/Web-Push protocol implemented entirely with Node's
+built-in crypto — no third-party push library.
+
+1. Generate a VAPID keypair (once):
+
+   ```bash
+   npx tsx scripts/vapid-gen.ts
+   ```
+
+2. Paste the printed `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`
+   into `.env.local`. The private key is a **secret** — never commit it.
+
+3. In the app, open **Settings → Notifications → Enable notifications**, accept
+   the browser prompt, and hit **Send test** to confirm delivery.
+
+Without VAPID keys the feature simply reports "not configured" (like email /
+Temporal) and nothing else changes. Subscriptions are stored per-user in SQLite
+(`push_subscriptions`, migration v6) and expired endpoints are pruned
+automatically. Send counts are exposed via `/api/health` → `metrics`
+(`push.sent` / `push.failed` / `push.subscription_expired`).
+
+Regenerate the PWA icons (branded PNGs, no image deps) any time with:
+
+```bash
+node scripts/gen-icons.mjs
+```
 
 ## Tech stack
 

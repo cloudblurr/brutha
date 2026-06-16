@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { cached, clearToolCache } from "@/lib/tools/_cache";
+import { cached, clearToolCache, cacheStats, TTL } from "@/lib/tools/_cache";
 
 describe("tool cache (S7)", () => {
   beforeEach(() => clearToolCache());
@@ -39,5 +39,39 @@ describe("tool cache (S7)", () => {
     await expect(cached("err", fn)).rejects.toThrow("fail");
     await expect(cached("err", fn)).rejects.toThrow("fail");
     expect(calls).toBe(2); // retried, not cached
+  });
+
+  it("respects a short per-entry TTL (value expires)", async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      return calls;
+    };
+    const first = await cached("ttl", fn, 20);
+    expect(first).toBe(1);
+    // Within TTL: cached.
+    expect(await cached("ttl", fn, 20)).toBe(1);
+    // After TTL: recomputed.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await cached("ttl", fn, 20)).toBe(2);
+    expect(calls).toBe(2);
+  });
+
+  it("exposes a longer TTL preset for static data", () => {
+    expect(TTL.static).toBeGreaterThan(TTL.live);
+    expect(TTL.live).toBeGreaterThan(TTL.realtime);
+  });
+
+  it("tracks hit/miss stats and hitRate", async () => {
+    clearToolCache();
+    const fn = async () => "x";
+    await cached("s", fn); // miss
+    await cached("s", fn); // hit
+    await cached("s", fn); // hit
+    const stats = cacheStats();
+    expect(stats.misses).toBe(1);
+    expect(stats.hits).toBe(2);
+    expect(stats.hitRate).toBeCloseTo(0.667, 2);
+    expect(stats.size).toBeGreaterThanOrEqual(1);
   });
 });

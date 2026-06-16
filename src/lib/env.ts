@@ -18,6 +18,17 @@ const envSchema = z.object({
   XAI_MODEL: z.string().min(1).optional(),
   AGENT_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
   AGENT_MAX_STEPS: z.coerce.number().int().min(1).max(100).optional(),
+  AGENT_STEP_WARN: z.coerce.number().int().min(1).max(100).optional(),
+
+  // Optional provider abstraction (route through any OpenAI-compatible API).
+  AGENT_PROVIDER: z.enum(["xai", "openai-compatible"]).optional(),
+  AGENT_MODEL: z.string().min(1).optional(),
+  AGENT_BASE_URL: z.string().url().optional(),
+  AGENT_API_KEY: z.string().optional(),
+  AGENT_PERSONA: z.string().optional(),
+
+  // Optional admin gate for /admin/tools + /api/tools.
+  ADMIN_SECRET: z.string().optional(),
 
   // Optional email (SMTP). All-or-nothing is enforced softly by the tool.
   SMTP_HOST: z.string().optional(),
@@ -42,6 +53,14 @@ const envSchema = z.object({
   AUTH_GOOGLE_ID: z.string().optional(),
   AUTH_GOOGLE_SECRET: z.string().optional(),
   AUTH_ALLOW_DEV_LOGIN: z.enum(["0", "1"]).optional(),
+
+  // Optional Web Push (installable-PWA notifications). When VAPID keys are set
+  // the app can push reminders/alerts/worker-completion to subscribed devices;
+  // without them the feature reports "not configured" and nothing else breaks.
+  // Generate keys with: `npx tsx scripts/vapid-gen.ts` (or the /api/push route).
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

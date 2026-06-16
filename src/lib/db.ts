@@ -180,6 +180,80 @@ const MIGRATIONS: Migration[] = [
       d.exec(`ALTER TABLE workers ADD COLUMN progress TEXT;`);
     },
   },
+  {
+    version: 6,
+    name: "push-subscriptions",
+    up: (d) => {
+      // Web Push subscriptions for installable-PWA notifications. Each row is
+      // one browser/device subscription, scoped to the owning user so a push
+      // (reminder fired, background worker finished, alert) reaches only that
+      // user's devices. The endpoint is unique; re-subscribing upserts.
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope     TEXT NOT NULL DEFAULT 'global',
+          endpoint  TEXT NOT NULL UNIQUE,
+          p256dh    TEXT NOT NULL,
+          auth      TEXT NOT NULL,
+          userAgent TEXT,
+          createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+          lastUsedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS push_subscriptions_scope
+          ON push_subscriptions (scope);
+      `);
+    },
+  },
+  {
+    version: 7,
+    name: "agent-memory",
+    up: (d) => {
+      // Deep, persistent agent memory: durable per-user facts/context the agent
+      // recalls across sessions. `content` is stored ENCRYPTED-AT-REST (an
+      // opaque envelope from lib/crypto/secretbox) when MEMORY_SECRET is set,
+      // and as tagged plaintext otherwise — so the column is always a string and
+      // the store decrypts on read. `keywords` holds a lowercase, non-sensitive
+      // search surface (extracted terms) so FTS works WITHOUT decrypting every
+      // row. `kind` groups memories (fact/preference/context/event); importance
+      // (1-5) biases recall ranking; lastUsedAt supports recency.
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS memories (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope      TEXT NOT NULL DEFAULT 'global',
+          kind       TEXT NOT NULL DEFAULT 'fact',
+          content    TEXT NOT NULL,
+          keywords   TEXT NOT NULL DEFAULT '',
+          importance INTEGER NOT NULL DEFAULT 3,
+          createdAt  TEXT NOT NULL DEFAULT (datetime('now')),
+          lastUsedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS memories_scope ON memories (scope);
+        CREATE INDEX IF NOT EXISTS memories_scope_importance
+          ON memories (scope, importance);
+
+        -- FTS over the non-sensitive keyword surface only.
+        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+          USING fts5(keywords, content='memories', content_rowid='id');
+
+        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+          INSERT INTO memories_fts(rowid, keywords) VALUES (new.id, new.keywords);
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, keywords)
+          VALUES ('delete', old.id, old.keywords);
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, keywords)
+          VALUES ('delete', old.id, old.keywords);
+          INSERT INTO memories_fts(rowid, keywords) VALUES (new.id, new.keywords);
+        END;
+      `);
+
+      // Tag notes with their source so voice-captured notes are first-class and
+      // filterable. Existing rows default to 'typed'.
+      d.exec(`ALTER TABLE notes ADD COLUMN source TEXT NOT NULL DEFAULT 'typed';`);
+    },
+  },
 ];
 
 /**

@@ -29,4 +29,24 @@ describe("tool registry (S8/S11)", () => {
       registerTool("calculate", {} as never)
     ).toThrow(/already registered/);
   });
+
+  it("includes the business tool categories and their tools", () => {
+    const all = getAllTools();
+    const manifest = getToolManifest();
+    for (const cat of ["finance", "documents", "scheduling"]) {
+      expect(manifest.categories).toHaveProperty(cat);
+    }
+    for (const name of [
+      "calculateRoi",
+      "amortizeLoan",
+      "breakEvenAnalysis",
+      "invoiceEstimate",
+      "draftEmail",
+      "generateDocument",
+      "suggestMeetingTimes",
+      "parseMeetingFromText",
+    ]) {
+      expect(all).toHaveProperty(name);
+    }
+  });
 });

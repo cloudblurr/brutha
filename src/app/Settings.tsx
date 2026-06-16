@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession, signIn as nextSignIn, signOut as nextSignOut } from "next-auth/react";
 import { Settings, User, X, LogIn, LogOut, Sun, Moon } from "./icons";
+import { usePush } from "./usePush";
 
 /**
  * Settings menu + Profile modal backed by real Auth.js sessions.
@@ -260,6 +261,9 @@ export function SettingsModal({
           </button>
         </section>
 
+        {/* Notifications (Web Push) */}
+        <NotificationsSection />
+
         {/* Email identity */}
         <section className="mt-5">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--fg-subtle)]">
@@ -289,5 +293,101 @@ export function SettingsModal({
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Web Push opt-in control. Reflects the live permission/subscription state and
+ * lets the user enable, send a test, or disable device notifications. Renders a
+ * gentle hint (instead of a button) when the browser is unsupported or the
+ * server hasn't configured VAPID keys.
+ */
+function NotificationsSection() {
+  const { status, enable, disable, sendTest } = usePush();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  return (
+    <section className="mt-5">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--fg-subtle)]">
+        Notifications
+      </h3>
+      <p className="mt-1 text-xs text-[var(--fg-muted)]">
+        Get push alerts on this device when reminders fire or background workers
+        finish — even when BRUTHA isn&apos;t open.
+      </p>
+
+      {status === "unsupported" && (
+        <p className="mt-2 text-xs text-[var(--fg-muted)]">
+          This browser doesn&apos;t support push notifications. On iOS, install
+          BRUTHA to your Home Screen first (Share → Add to Home Screen).
+        </p>
+      )}
+      {status === "unconfigured" && (
+        <p className="mt-2 text-xs text-[var(--fg-muted)]">
+          Push isn&apos;t configured on the server yet. Set VAPID keys to enable
+          it (see README → Notifications).
+        </p>
+      )}
+      {status === "denied" && (
+        <p className="mt-2 text-xs text-amber-500 dark:text-amber-300">
+          Notifications are blocked in your browser settings. Re-allow them for
+          this site to enable push.
+        </p>
+      )}
+
+      {(status === "default" || status === "subscribed" || status === "loading") && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {status !== "subscribed" ? (
+            <button
+              type="button"
+              disabled={busy || status === "loading"}
+              onClick={async () => {
+                setBusy(true);
+                setMsg(null);
+                const ok = await enable();
+                setBusy(false);
+                setMsg(ok ? "Notifications enabled." : "Could not enable notifications.");
+              }}
+              className="rounded-lg border px-3 py-2 text-xs font-medium hover:bg-[var(--hover)] disabled:opacity-50"
+            >
+              {busy ? "Enabling…" : "Enable notifications"}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setMsg(null);
+                  const ok = await sendTest();
+                  setBusy(false);
+                  setMsg(ok ? "Test sent — check your device." : "Test failed.");
+                }}
+                className="rounded-lg border px-3 py-2 text-xs font-medium hover:bg-[var(--hover)] disabled:opacity-50"
+              >
+                Send test
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setMsg(null);
+                  await disable();
+                  setBusy(false);
+                  setMsg("Notifications disabled on this device.");
+                }}
+                className="rounded-lg border px-3 py-2 text-xs font-medium hover:bg-[var(--hover)] disabled:opacity-50"
+              >
+                Disable
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {msg && <p className="mt-1.5 text-xs text-[var(--fg-muted)]">{msg}</p>}
+    </section>
   );
 }

@@ -1,7 +1,6 @@
 import { generateText } from "ai";
-import { xai } from "@ai-sdk/xai";
+import { resolveModel } from "@/lib/model";
 import { getEnvError } from "@/lib/env";
-import { resolveAgentConfig } from "@/lib/agent";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -40,9 +39,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { model } = resolveAgentConfig();
     const { text } = await generateText({
-      model: xai(model),
+      model: resolveModel(),
       system: ENHANCE_SYSTEM,
       prompt: `Rewrite this prompt:\n\n${prompt.trim()}`,
       temperature: 0.4,
