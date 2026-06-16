@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "./AuthProvider";
+import { PWARegister } from "./PWARegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,6 +18,20 @@ export const metadata: Metadata = {
   title: "BRUTHA — Agentic AI",
   description:
     "BRUTHA — a polished, agentic AI assistant powered by xAI Grok with 50+ built-in tools.",
+  manifest: "/manifest.webmanifest",
+  applicationName: "BRUTHA",
+  appleWebApp: {
+    capable: true,
+    title: "BRUTHA",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
 export const viewport: Viewport = {
@@ -57,6 +72,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
       <body className="min-h-full">
+        <PWARegister />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

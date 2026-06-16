@@ -35,4 +35,7 @@ export const Metric = {
   temporalFallback: "temporal.fallback_to_streaming",
   temporalDurableOk: "temporal.durable_ok",
   chatRequests: "chat.requests",
+  pushSent: "push.sent",
+  pushFailed: "push.failed",
+  pushSubscriptionExpired: "push.subscription_expired",
 } as const;

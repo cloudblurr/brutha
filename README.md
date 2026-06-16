@@ -319,6 +319,52 @@ and reference it by key, no code change.
 > For Gmail, use an [app password](https://myaccount.google.com/apppasswords),
 > not your account password.
 
+## Install on your phone (PWA) + push notifications
+
+BRUTHA is an installable **Progressive Web App**, so it runs as a real app on
+**Android and iOS** with no app store, and can send **Web Push** notifications
+(reminders, background-worker completion, alerts) even when it isn't open.
+
+**Install**
+
+- **Android (Chrome):** open the site → menu → *Install app* / *Add to Home
+  Screen*. It launches full-screen from your home screen.
+- **iOS (Safari 16.4+):** open the site → Share → *Add to Home Screen*. iOS only
+  permits Web Push for apps installed to the Home Screen, so install first, then
+  enable notifications from inside the app.
+
+The app shell is cached by a service worker (`public/sw.js`), so it opens
+offline and shows a friendly `/offline` page when there's no network.
+
+**Enable push notifications (optional, zero dependencies)**
+
+Push uses the standard VAPID/Web-Push protocol implemented entirely with Node's
+built-in crypto — no third-party push library.
+
+1. Generate a VAPID keypair (once):
+
+   ```bash
+   npx tsx scripts/vapid-gen.ts
+   ```
+
+2. Paste the printed `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`
+   into `.env.local`. The private key is a **secret** — never commit it.
+
+3. In the app, open **Settings → Notifications → Enable notifications**, accept
+   the browser prompt, and hit **Send test** to confirm delivery.
+
+Without VAPID keys the feature simply reports "not configured" (like email /
+Temporal) and nothing else changes. Subscriptions are stored per-user in SQLite
+(`push_subscriptions`, migration v6) and expired endpoints are pruned
+automatically. Send counts are exposed via `/api/health` → `metrics`
+(`push.sent` / `push.failed` / `push.subscription_expired`).
+
+Regenerate the PWA icons (branded PNGs, no image deps) any time with:
+
+```bash
+node scripts/gen-icons.mjs
+```
+
 ## Tech stack
 
 - [Next.js 16](https://nextjs.org)

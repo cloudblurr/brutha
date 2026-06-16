@@ -53,6 +53,14 @@ const envSchema = z.object({
   AUTH_GOOGLE_ID: z.string().optional(),
   AUTH_GOOGLE_SECRET: z.string().optional(),
   AUTH_ALLOW_DEV_LOGIN: z.enum(["0", "1"]).optional(),
+
+  // Optional Web Push (installable-PWA notifications). When VAPID keys are set
+  // the app can push reminders/alerts/worker-completion to subscribed devices;
+  // without them the feature reports "not configured" and nothing else breaks.
+  // Generate keys with: `npx tsx scripts/vapid-gen.ts` (or the /api/push route).
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

@@ -180,6 +180,30 @@ const MIGRATIONS: Migration[] = [
       d.exec(`ALTER TABLE workers ADD COLUMN progress TEXT;`);
     },
   },
+  {
+    version: 6,
+    name: "push-subscriptions",
+    up: (d) => {
+      // Web Push subscriptions for installable-PWA notifications. Each row is
+      // one browser/device subscription, scoped to the owning user so a push
+      // (reminder fired, background worker finished, alert) reaches only that
+      // user's devices. The endpoint is unique; re-subscribing upserts.
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope     TEXT NOT NULL DEFAULT 'global',
+          endpoint  TEXT NOT NULL UNIQUE,
+          p256dh    TEXT NOT NULL,
+          auth      TEXT NOT NULL,
+          userAgent TEXT,
+          createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+          lastUsedAt TEXT
+        );
+        CREATE INDEX IF NOT EXISTS push_subscriptions_scope
+          ON push_subscriptions (scope);
+      `);
+    },
+  },
 ];
 
 /**
