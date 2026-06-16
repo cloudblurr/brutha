@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { cached } from "./_cache";
+import { assertPublicUrl, BlockedUrlError } from "./_ssrf";
+import { withRetry } from "./_reliability";
 
 function errMsg(e: unknown) {
   if (e instanceof Error) {
@@ -16,13 +18,33 @@ function errMsg(e: unknown) {
 // stall the agent's tool loop. fetchUrl uses its own (longer) timeout below.
 const DEFAULT_FETCH_TIMEOUT_MS = 10000;
 
+/** HTTP error that remembers its status so retry logic can skip 4xx. */
+class HttpError extends Error {
+  constructor(public status: number, url: string) {
+    super(`HTTP ${status} for ${url}`);
+    this.name = "HttpError";
+  }
+}
+
+/** Retry on network errors, timeouts, and 5xx; never retry 4xx (won't fix). */
+function isRetryable(e: unknown): boolean {
+  if (e instanceof HttpError) return e.status >= 500;
+  return true; // network/timeout errors are worth a retry
+}
+
 async function getJson(url: string, init?: RequestInit) {
-  const res = await fetch(url, {
-    ...init,
-    signal: init?.signal ?? AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return res.json();
+  // Transient blips on these open APIs are common; retry with backoff.
+  return withRetry(
+    async () => {
+      const res = await fetch(url, {
+        ...init,
+        signal: init?.signal ?? AbortSignal.timeout(DEFAULT_FETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new HttpError(res.status, url);
+      return res.json();
+    },
+    { attempts: 3, baseDelayMs: 150, maxDelayMs: 1200, retryable: isRetryable }
+  );
 }
 
 export const webTools = {
@@ -95,16 +117,29 @@ export const webTools = {
 
   fetchUrl: tool({
     description:
-      "Fetch a web page or API URL and return its text content (truncated). Use for reading articles, docs, or JSON.",
+      "Fetch a web page or API URL and return its text content (truncated). Use for reading articles, docs, or JSON. Only public http/https URLs are allowed.",
     inputSchema: z.object({ url: z.string().url() }),
     execute: async ({ url }) => {
       try {
+        // SSRF guard: reject private/loopback/link-local/metadata targets
+        // (incl. hostnames that resolve to internal IPs) before fetching.
+        await assertPublicUrl(url);
         // S7: cache + single-flight identical URL fetches for 5 min.
         return await cached(`fetchUrl:${url}`, async () => {
           const res = await fetch(url, {
             headers: { "User-Agent": "GrokAgent/1.0" },
             signal: AbortSignal.timeout(15000),
+            // Don't auto-follow redirects: a 3xx could point at an internal
+            // host and bypass the pre-fetch SSRF check.
+            redirect: "manual",
           });
+          if (res.status >= 300 && res.status < 400) {
+            return {
+              error: "URL responded with a redirect, which is not followed for safety.",
+              status: res.status,
+              location: res.headers.get("location") ?? undefined,
+            };
+          }
           const ct = res.headers.get("content-type") ?? "";
           let text = await res.text();
           if (ct.includes("text/html")) {
@@ -126,6 +161,7 @@ export const webTools = {
           };
         });
       } catch (e) {
+        if (e instanceof BlockedUrlError) return { error: e.message };
         return { error: `Failed to fetch URL: ${errMsg(e)}` };
       }
     },

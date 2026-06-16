@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.207",
+    "@ai-sdk/openai-compatible": "^2.0.50",
     "@ai-sdk/xai": "^3.0.95",
     "@temporalio/activity": "^1.18.1",
     "@temporalio/client": "^1.18.1",

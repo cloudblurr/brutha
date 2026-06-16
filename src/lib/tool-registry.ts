@@ -8,6 +8,9 @@ import { textTools } from "./tools/text";
 import { extraTools } from "./tools/extras";
 import { imageTools } from "./tools/image";
 import { workerTools } from "./tools/workers";
+import { financeTools } from "./tools/finance";
+import { documentTools } from "./tools/documents";
+import { schedulingTools } from "./tools/scheduling";
 
 /**
  * Tool registry & plugin hook (S11).
@@ -33,6 +36,9 @@ export const toolCategories: Record<string, ToolMap> = {
   extras: extraTools,
   image: imageTools,
   workers: workerTools,
+  finance: financeTools,
+  documents: documentTools,
+  scheduling: schedulingTools,
 };
 
 /**
@@ -52,7 +58,17 @@ export const DEFAULT_FEATURES: FeatureFlags = {
 };
 
 // Categories that are always available regardless of feature flags.
-const ALWAYS_ON = ["utility", "storage", "email", "datetime", "text", "extras"];
+const ALWAYS_ON = [
+  "utility",
+  "storage",
+  "email",
+  "datetime",
+  "text",
+  "extras",
+  "finance",
+  "documents",
+  "scheduling",
+];
 
 // Plugin-registered tools (populated via registerTool at startup).
 const pluginTools: ToolMap = {};

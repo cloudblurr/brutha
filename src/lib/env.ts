@@ -18,6 +18,17 @@ const envSchema = z.object({
   XAI_MODEL: z.string().min(1).optional(),
   AGENT_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
   AGENT_MAX_STEPS: z.coerce.number().int().min(1).max(100).optional(),
+  AGENT_STEP_WARN: z.coerce.number().int().min(1).max(100).optional(),
+
+  // Optional provider abstraction (route through any OpenAI-compatible API).
+  AGENT_PROVIDER: z.enum(["xai", "openai-compatible"]).optional(),
+  AGENT_MODEL: z.string().min(1).optional(),
+  AGENT_BASE_URL: z.string().url().optional(),
+  AGENT_API_KEY: z.string().optional(),
+  AGENT_PERSONA: z.string().optional(),
+
+  // Optional admin gate for /admin/tools + /api/tools.
+  ADMIN_SECRET: z.string().optional(),
 
   // Optional email (SMTP). All-or-nothing is enforced softly by the tool.
   SMTP_HOST: z.string().optional(),

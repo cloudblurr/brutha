@@ -75,6 +75,8 @@ export async function POST(req: Request) {
           durable: true,
           workflowId: result.workflowId,
           config: result.config,
+          hitStepLimit: result.hitStepLimit,
+          steps: result.steps,
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       );

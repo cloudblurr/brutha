@@ -17,10 +17,12 @@ export interface RunAgentInput {
 export interface RunAgentOutput {
   text: string;
   config: AgentConfig;
+  steps: number;
+  hitStepLimit: boolean;
 }
 
 /**
- * Temporal activity that runs the Grok agent loop to completion.
+ * Temporal activity that runs the agent loop to completion.
  *
  * This executes OUTSIDE the workflow sandbox (in the regular Node.js worker),
  * so it has full access to the network, SQLite, and the AI SDK. Because it is
@@ -41,7 +43,14 @@ export async function runAgentActivity(
   log.info("runAgentActivity: agent finished", {
     model: result.config.model,
     chars: result.text.length,
+    steps: result.steps,
+    hitStepLimit: result.hitStepLimit,
   });
 
-  return { text: result.text, config: result.config };
+  return {
+    text: result.text,
+    config: result.config,
+    steps: result.steps,
+    hitStepLimit: result.hitStepLimit,
+  };
 }

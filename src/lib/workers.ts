@@ -150,7 +150,7 @@ async function runInProcessWorker(w: Worker): Promise<void> {
   // Lazy import to avoid a circular dependency
   // (agent -> tool-registry -> tools/workers -> workers -> agent).
   const { runAgentFromUIMessages } = await import("./agent");
-  const { text } = await runAgentFromUIMessages(
+  const { text, hitStepLimit } = await runAgentFromUIMessages(
     [
       {
         id: randomUUID(),
@@ -161,7 +161,12 @@ async function runInProcessWorker(w: Worker): Promise<void> {
     {},
     (label) => setProgress(w.id, label)
   );
-  setStatus(w.id, "done", { result: text });
+  // If the loop hit its hard step cap the answer may be truncated; flag it so
+  // the user knows rather than silently trusting a partial result.
+  const finalText = hitStepLimit
+    ? `${text}\n\n_Note: this task reached the agent's step limit and may be incomplete._`
+    : text;
+  setStatus(w.id, "done", { result: finalText });
 }
 
 /**

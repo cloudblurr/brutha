@@ -256,14 +256,54 @@ The model will automatically discover and call it when relevant.
 
 | Env var        | Default      | Description                          |
 | -------------- | ------------ | ------------------------------------ |
-| `XAI_API_KEY`  | _(none)_     | Required. Your xAI API key.          |
+| `XAI_API_KEY`  | _(none)_     | Required (xai provider). Your xAI API key. |
 | `XAI_MODEL`    | `grok-3`     | Optional. Grok model to use.         |
+| `AGENT_PROVIDER` | `xai`      | Optional. `xai` or `openai-compatible`. |
+| `AGENT_BASE_URL` | _(none)_   | OpenAI-compatible endpoint (required when `AGENT_PROVIDER=openai-compatible`). |
+| `AGENT_API_KEY`  | _(XAI_API_KEY)_ | API key for the OpenAI-compatible endpoint. |
+| `AGENT_MODEL`    | _(XAI_MODEL)_ | Model id for the active provider.  |
+| `AGENT_TEMPERATURE` | `0.2`   | Sampling temperature.                |
+| `AGENT_MAX_STEPS`   | `14`    | Hard cap on model↔tool steps.        |
+| `AGENT_STEP_WARN`   | `maxSteps-4` | Step at which the agent is nudged to consolidate. |
+| `AGENT_PERSONA`     | `general` | Persona overlay: `general`/`legal`/`finance`/`ops`. |
+| `ADMIN_SECRET`      | _(none)_ | Gates `/admin/tools` + `/api/tools` when set (header `x-admin-secret` or `?admin_key=`). |
 | `SMTP_HOST`    | _(none)_     | Optional. SMTP server for `sendEmail`. |
 | `SMTP_PORT`    | _(none)_     | Optional. 465 (SSL) or 587 (STARTTLS). |
 | `SMTP_USER`    | _(none)_     | Optional. SMTP username / email.     |
 | `SMTP_PASS`    | _(none)_     | Optional. SMTP / app password.       |
 | `SMTP_FROM`    | `SMTP_USER`  | Optional. From address.              |
 | `TEST_EMAIL_TO`| `you@example.com` | Default recipient when `sendEmail` is called without a `to`. |
+
+### Model providers
+
+BRUTHA is not hardwired to xAI. Set `AGENT_PROVIDER=openai-compatible` with
+`AGENT_BASE_URL` (and optionally `AGENT_API_KEY`) to route the agent through any
+OpenAI-compatible endpoint (a gateway, a self-hosted vLLM/Ollama, OpenAI, etc.)
+without code changes. Leaving `AGENT_PROVIDER` unset keeps the default xAI/Grok
+path, so existing deployments need change nothing.
+
+### Personas
+
+`AGENT_PERSONA` layers a short overlay on top of the base system prompt so the
+same agent can be re-skinned for a business context: `legal` (cautious, numbered
+clauses), `finance` (precise, tabular), `ops` (action-oriented checklists), or
+`general` (default). Personas live in `locales/personas/personas.json` — add one
+and reference it by key, no code change.
+
+### Health & reliability
+
+- `GET /api/health` returns a structured health map (env, SQLite, Temporal, and
+  pings of two critical external APIs). Returns `200` for `ok`/`degraded` and
+  `503` when a critical dependency is down — suitable for a load-balancer probe.
+- External tool calls are wrapped with retry + exponential backoff and per-call
+  timeouts; 4xx responses are not retried.
+- `fetchUrl` is SSRF-guarded: only public `http(s)` URLs are allowed; private,
+  loopback, link-local, and cloud-metadata targets (including hostnames that
+  resolve to them) are rejected, and redirects are not auto-followed.
+- The agent signals `hitStepLimit` when it stops at the hard step cap so callers
+  (and background workers) can flag a potentially truncated answer.
+
+
 
 > **Email is optional.** Without SMTP vars, the `sendEmail` tool simply
 > reports that email is not configured — the rest of the agent works fine.

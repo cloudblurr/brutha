@@ -1,4 +1,6 @@
+import { notFound } from "next/navigation";
 import { getToolManifest } from "@/lib/tool-registry";
+import { isAdminContext } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 
@@ -10,9 +12,20 @@ export const metadata = {
 /**
  * Hidden admin page (S8) that lists every registered tool grouped by category.
  * Server component — reads the manifest directly. Not linked from the main UI
- * and marked noindex.
+ * and marked noindex. Gated by ADMIN_SECRET (lib/admin-auth): when the secret
+ * is configured, callers must pass ?admin_key=<secret> (or the x-admin-secret
+ * header); otherwise the page 404s. Open when ADMIN_SECRET is unset.
  */
-export default function ToolsAdminPage() {
+export default async function ToolsAdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ admin_key?: string }>;
+}) {
+  const { admin_key } = await searchParams;
+  if (!(await isAdminContext(admin_key))) {
+    notFound();
+  }
+
   const manifest = getToolManifest();
 
   return (
